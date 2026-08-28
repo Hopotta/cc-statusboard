@@ -69,5 +69,61 @@ export interface Statusboard {
   tasks: TaskStats;
   projects: ProjectStat[];
   dailyActivity: DailyActivity[];
+  advanced: {
+    toolUsage: ToolUsage;
+    workflowTimeline: WorkflowTimelinePayload;
+    promptCategories: PromptCategoriesPayload;
+    modelEfficiency: ModelEfficiency | null;
+  };
   generatedAt: string;
+}
+
+export interface ToolUsage {
+  tools: Array<{ name: string; count: number }>;
+  total: number;
+  uniqueTools: number;
+  byProject: Record<string, Array<{ name: string; count: number }>>;
+}
+
+export interface TimelineEvent {
+  t: string;
+  kind: "user" | "assistant" | "tool";
+  label: string;
+}
+
+export interface TimelineSession {
+  sessionId: string;
+  file: string;
+  events: TimelineEvent[];
+  firstEvent: string;
+  lastEvent: string;
+}
+
+export interface WorkflowTimelinePayload {
+  sessions: TimelineSession[];
+  count: number;
+}
+
+export interface PromptCategory {
+  slug: string;
+  label: string;
+  count: number;
+  sharePct: number;
+}
+
+export interface PromptCategoriesPayload {
+  categories: PromptCategory[];
+  total: number;
+  examples: Record<string, string[]>;
+}
+
+export interface ModelEfficiency {
+  tokensPerTask: number;
+  costPerTask: number;
+  outputRatio: number;
+  cacheHitRate: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalTokens: number;
+  totalCost: number;
 }

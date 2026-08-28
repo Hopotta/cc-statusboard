@@ -7,6 +7,10 @@ import { TokenTrend } from "./components/TokenTrend";
 import { ModelDistribution } from "./components/ModelDistribution";
 import { TasksPanel } from "./components/TasksPanel";
 import { ProjectTable } from "./components/ProjectTable";
+import { ToolUsage } from "./components/ToolUsage";
+import { PromptCategories } from "./components/PromptCategories";
+import { ModelEfficiency } from "./components/ModelEfficiency";
+import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { formatSeconds, formatTokens, formatUSD, relativeTime } from "./utils/format";
 
 export default function App() {
@@ -72,6 +76,12 @@ export default function App() {
               generatedAt={data.generatedAt}
             />
 
+            <SectionHeader
+              index="01"
+              title="Overview"
+              sub="daily activity, tokens, models, tasks, projects"
+            />
+
             {/* Secondary metric strip */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
               <StatTile
@@ -127,6 +137,34 @@ export default function App() {
               </div>
             </div>
 
+            {/* Phase 4: Advanced Analytics */}
+            <SectionHeader
+              index="02"
+              title="Advanced analytics"
+              sub="tool usage, prompt categories, model efficiency, workflow timeline"
+            />
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
+                <ToolUsage toolUsage={data.advanced.toolUsage} />
+              </div>
+              <PromptCategories
+                categories={data.advanced.promptCategories.categories}
+                total={data.advanced.promptCategories.total}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {data.advanced.modelEfficiency && (
+                <ModelEfficiency efficiency={data.advanced.modelEfficiency} />
+              )}
+              <div className="lg:col-span-2">
+                <WorkflowTimeline
+                  sessions={data.advanced.workflowTimeline.sessions}
+                />
+              </div>
+            </div>
+
             <Footer
               generatedAt={data.generatedAt}
               topModel={data.summary.mostUsedModel?.modelName ?? "—"}
@@ -135,6 +173,28 @@ export default function App() {
           </>
         )}
       </main>
+    </div>
+  );
+}
+
+function SectionHeader({
+  index,
+  title,
+  sub,
+}: {
+  index: string;
+  title: string;
+  sub: string;
+}) {
+  return (
+    <div className="flex items-end justify-between border-b border-ink-700 pb-3">
+      <div className="flex items-baseline gap-4">
+        <span className="font-mono text-[11px] text-signal">§ {index}</span>
+        <h2 className="font-mono text-base text-fg uppercase tracking-widest2">
+          {title}
+        </h2>
+      </div>
+      <span className="font-mono text-xs text-muted hidden sm:inline">{sub}</span>
     </div>
   );
 }

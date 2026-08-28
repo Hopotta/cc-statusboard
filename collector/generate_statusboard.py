@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from collector import aggregator, ccusage_parser, jsonl_parser  # noqa: E402
+from collector.advanced import parse_all as parse_advanced  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "statusboard.json"
 # Mirror copy for the Vite dev server. Vite only serves files inside its
@@ -32,16 +33,19 @@ PUBLIC_OUT = Path(__file__).resolve().parent.parent / "frontend" / "public" / "s
 
 def build_statusboard() -> dict:
     """Run all collectors and return the merged dict (no I/O)."""
-    print("[1/3] ccusage: session ...", file=sys.stderr)
+    print("[1/4] ccusage: session ...", file=sys.stderr)
     sess = ccusage_parser.parse_session()
-    print("[1/3] ccusage: daily ...", file=sys.stderr)
+    print("[1/4] ccusage: daily ...", file=sys.stderr)
     daily = ccusage_parser.parse_daily()
 
-    print("[2/3] jsonl: scanning projects ...", file=sys.stderr)
+    print("[2/4] jsonl: scanning projects ...", file=sys.stderr)
     jsonl = jsonl_parser.parse_all()
 
-    print("[3/3] aggregating ...", file=sys.stderr)
-    return aggregator.aggregate(sess, daily, jsonl)
+    print("[3/4] advanced analytics ...", file=sys.stderr)
+    advanced = parse_advanced(ccusage_daily_raw=daily, jsonl_summary=jsonl)
+
+    print("[4/4] aggregating ...", file=sys.stderr)
+    return aggregator.aggregate(sess, daily, jsonl, advanced=advanced)
 
 
 def write_statusboard(out_path: Path, payload: dict) -> None:

@@ -12,6 +12,7 @@ unified statusboard.json shape described in the plan:
       "tasks":    { totalTasks, totalActiveSeconds, averageSeconds, maxSeconds, busiestDay },
       "projects": [ {project, tasks, activeSeconds, tokens, cost, ...}, ... ],
       "dailyActivity": [ {date, tokens, tasks, activeSeconds, cost}, ... ],
+      "advanced": { toolUsage, workflowTimeline, promptCategories, modelEfficiency },
       "generatedAt": "ISO timestamp"
     }
 
@@ -22,7 +23,7 @@ touch JSONL directly.  Pass in the already-parsed data instead.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 
 def _fmt_seconds(secs: int) -> str:
@@ -99,11 +100,13 @@ def aggregate(
     ccusage_session_raw: Dict[str, Any],
     ccusage_daily_raw: Dict[str, Any],
     jsonl_summary: Dict[str, Any],
+    advanced: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Build the final statusboard.json payload.
 
     Arguments are the already-parsed outputs from ccusage_parser and jsonl_parser.
+    `advanced` is the optional Phase-4 analytics payload (tool usage, timeline, etc).
     """
     from .ccusage_parser import (
         daily_series,
@@ -170,6 +173,8 @@ def aggregate(
                 "totalTokens": m["totalTokens"],
                 "inputTokens": m["inputTokens"],
                 "outputTokens": m["outputTokens"],
+                "cacheCreationTokens": m.get("cacheCreationTokens", 0),
+                "cacheReadTokens": m.get("cacheReadTokens", 0),
                 "cost": m["cost"],
                 "sharePct": round(100 * m["totalTokens"] / ccusage_total_tokens, 1),
             }
@@ -189,5 +194,6 @@ def aggregate(
         },
         "projects": projects_out,
         "dailyActivity": daily,
+        "advanced": advanced or {},
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
