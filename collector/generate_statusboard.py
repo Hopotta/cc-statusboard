@@ -25,6 +25,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from collector import aggregator, ccusage_parser, jsonl_parser  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "statusboard.json"
+# Mirror copy for the Vite dev server. Vite only serves files inside its
+# project root, so we duplicate statusboard.json into frontend/public/.
+PUBLIC_OUT = Path(__file__).resolve().parent.parent / "frontend" / "public" / "statusboard.json"
 
 
 def build_statusboard() -> dict:
@@ -43,7 +46,16 @@ def build_statusboard() -> dict:
 
 def write_statusboard(out_path: Path, payload: dict) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    out_path.write_text(text, encoding="utf-8")
+
+    # Mirror to frontend/public/statusboard.json so the Vite dev server can serve it.
+    try:
+        PUBLIC_OUT.parent.mkdir(parents=True, exist_ok=True)
+        PUBLIC_OUT.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        print(f"[warn] could not write {PUBLIC_OUT}: {exc}", file=sys.stderr)
+
     s = payload.get("summary", {})
     print(
         f"\n  -> wrote {out_path}\n"
