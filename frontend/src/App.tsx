@@ -12,7 +12,7 @@ import { PromptCategories } from "./components/PromptCategories";
 import { ModelEfficiency } from "./components/ModelEfficiency";
 import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { formatSeconds, formatTokens, formatUSD, relativeTime } from "./utils/format";
-import { localISODate, diffDays } from "./utils/date";
+import { localISODate, diffDays, formatDateTimeEn } from "./utils/date";
 
 export default function App() {
   const { data, loading, error, lastUpdated, reload } = useStatusboard(5000);
@@ -290,7 +290,7 @@ function Footer({
 }) {
   return (
     <footer className="border-t border-ink-700 pt-6 pb-2 grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono text-[11px] text-muted">
-      <FootCell label="Generated" value={new Date(generatedAt).toLocaleString()} />
+      <FootCell label="Generated" value={formatDateTimeEn(new Date(generatedAt))} />
       <FootCell label="Top model" value={topModel} />
       <FootCell label="Total tokens" value={formatTokens(totalTokens, 2)} />
       <FootCell label="Build" value="cc-statusboard v0.1" />

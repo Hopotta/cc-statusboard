@@ -6,6 +6,8 @@
  * - formatPct:     0.756      -> "75.6%"
  */
 
+import { formatTimeEn } from "./date";
+
 const TOKEN_UNITS: Array<[number, string]> = [
   [1_000_000_000_000, "T"],
   [1_000_000_000, "B"],
@@ -58,5 +60,5 @@ export function relativeTime(d: Date | null): string {
   if (diff < 5) return "just now";
   if (diff < 60) return `${Math.floor(diff)}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return d.toLocaleTimeString();
+  return formatTimeEn(d);
 }

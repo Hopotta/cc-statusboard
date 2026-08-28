@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatDateTimeEn, formatTimeEn } from "../utils/date";
 
 interface TimelineEvent {
   t: string;
@@ -73,18 +74,7 @@ export function WorkflowTimeline({
                     {s.sessionId.slice(0, 8)}…
                   </span>
                   <span className="font-mono text-[10px] text-muted">
-                    {first.toLocaleString(undefined, {
-                      month: "short",
-                      day: "2-digit",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}{" "}
-                    →{" "}
-                    {last.toLocaleTimeString(undefined, {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}{" "}
-                    ({durMin}m)
+                    {formatDateTimeEn(first)} → {formatTimeEn(last)} ({durMin}m)
                   </span>
                 </div>
                 <div className="flex items-center gap-3 font-mono text-[11px] text-muted shrink-0">
@@ -108,10 +98,7 @@ export function WorkflowTimeline({
                     {s.events.slice(0, 50).map((e, i) => (
                       <li key={i} className="flex items-baseline gap-3">
                         <span className="font-mono text-[10px] text-muted w-14 shrink-0">
-                          {new Date(e.t).toLocaleTimeString(undefined, {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {formatTimeEn(new Date(e.t))}
                         </span>
                         <KindBadge kind={e.kind} />
                         <span className="font-mono text-xs text-fg truncate">

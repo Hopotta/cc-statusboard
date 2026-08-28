@@ -1,4 +1,5 @@
 import { formatTokens, formatTokensLong } from "../utils/format";
+import { formatLongDateTimeEn } from "../utils/date";
 
 /**
  * The signature element: a single oversized numeric readout (the flight-deck
@@ -49,12 +50,7 @@ export function HeroReadout({
           <Ornament label="Spend" value={`$${cost.toFixed(2)}`} />
           <Ornament
             label="Generated"
-            value={new Date(generatedAt).toLocaleString(undefined, {
-              hour: "2-digit",
-              minute: "2-digit",
-              month: "short",
-              day: "2-digit",
-            })}
+            value={formatLongDateTimeEn(new Date(generatedAt))}
           />
           <Ornament label="Source" value="ccusage · jsonl" />
           <Ornament label="Local" value={`${host}:${port}`} />

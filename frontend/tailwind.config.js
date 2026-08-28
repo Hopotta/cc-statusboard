@@ -4,9 +4,12 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // Monospace display + body for the "instrument" aesthetic
-        mono: ['"JetBrains Mono"', '"IBM Plex Mono"', "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
-        sans: ['"Inter"', "system-ui", "sans-serif"],
+        // Monospace display + body for the "instrument" aesthetic.
+        // CJK fallbacks come before the generic families: without them a
+        // zh-CN Windows box renders Chinese text (user/project names) in
+        // SimSun, which is proportional and jarring next to JetBrains Mono.
+        mono: ['"JetBrains Mono"', '"IBM Plex Mono"', "ui-monospace", "SFMono-Regular", "Menlo", '"Noto Sans Mono CJK SC"', '"Microsoft YaHei"', '"PingFang SC"', "monospace"],
+        sans: ['"Inter"', "system-ui", '"PingFang SC"', '"Microsoft YaHei"', "sans-serif"],
       },
       colors: {
         // Mission-control palette: deep ink, hairline rules, signal amber.
