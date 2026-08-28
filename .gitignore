@@ -17,6 +17,8 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Project artefacts
+# Project artefacts - generated, not source
+statusboard.json
 statusboard.local.json
+frontend/public/statusboard.json
 data/raw/
