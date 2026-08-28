@@ -1,0 +1,193 @@
+"""
+aggregator.py
+=============
+
+Joins ccusage (token/cost/model) with JSONL (tasks/time/projects) into the
+unified statusboard.json shape described in the plan:
+
+    {
+      "summary":  { totalTokens, totalTasks, totalTime, averageTask, mostUsedModel },
+      "tokens":   { total, input, output, cacheCreation, cacheRead, cost },
+      "models":   [ {modelName, totalTokens, sharePct, ...}, ... ],
+      "tasks":    { totalTasks, totalActiveSeconds, averageSeconds, maxSeconds, busiestDay },
+      "projects": [ {project, tasks, activeSeconds, tokens, cost, ...}, ... ],
+      "dailyActivity": [ {date, tokens, tasks, activeSeconds, cost}, ... ],
+      "generatedAt": "ISO timestamp"
+    }
+
+The aggregator is the "single source of truth" - it doesn't import ccusage or
+touch JSONL directly.  Pass in the already-parsed data instead.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+
+def _fmt_seconds(secs: int) -> str:
+    """Render seconds as 'Xh Ym' or 'Ym' for compact display."""
+    if secs <= 0:
+        return "0m"
+    h, rem = divmod(int(secs), 3600)
+    m = rem // 60
+    if h and m:
+        return f"{h}h {m}m"
+    if h:
+        return f"{h}h"
+    return f"{m}m"
+
+
+def most_used_model(models: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Pick the model with the largest totalTokens share."""
+    if not models:
+        return None
+    total = sum(m["totalTokens"] for m in models) or 1
+    top = models[0]
+    return {
+        "modelName": top["modelName"],
+        "totalTokens": top["totalTokens"],
+        "sharePct": round(100 * top["totalTokens"] / total, 1),
+    }
+
+
+def busiest_day(daily_activity: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not daily_activity:
+        return None
+    busiest = max(daily_activity, key=lambda d: d.get("tasks", 0))
+    return busiest
+
+
+def longest_task(task_durations: List[int]) -> int:
+    return max(task_durations) if task_durations else 0
+
+
+def merge_daily(
+    ccusage_daily: List[Dict[str, Any]],
+    jsonl_daily_tasks: List[Dict[str, Any]],
+    jsonl_daily_active: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Left-joined per-day series keyed by date.  We iterate over the union of
+    dates seen by both sources so days that only have token data (e.g. agent
+    ran without user prompts) still appear.
+    """
+    by_date: Dict[str, Dict[str, Any]] = {}
+    for d in ccusage_daily:
+        by_date[d["date"]] = {
+            "date": d["date"],
+            "tokens": d["totalTokens"],
+            "inputTokens": d["inputTokens"],
+            "outputTokens": d["outputTokens"],
+            "cacheCreationTokens": d["cacheCreationTokens"],
+            "cacheReadTokens": d["cacheReadTokens"],
+            "cost": d["totalCost"],
+            "tasks": 0,
+            "activeSeconds": 0,
+        }
+    for t in jsonl_daily_tasks:
+        slot = by_date.setdefault(t["date"], {"date": t["date"], "tokens": 0, "cost": 0.0})
+        slot["tasks"] = t["tasks"]
+    for a in jsonl_daily_active:
+        slot = by_date.setdefault(a["date"], {"date": a["date"], "tokens": 0, "cost": 0.0})
+        slot["activeSeconds"] = a["activeSeconds"]
+    out = sorted(by_date.values(), key=lambda d: d["date"])
+    return out
+
+
+def aggregate(
+    ccusage_session_raw: Dict[str, Any],
+    ccusage_daily_raw: Dict[str, Any],
+    jsonl_summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build the final statusboard.json payload.
+
+    Arguments are the already-parsed outputs from ccusage_parser and jsonl_parser.
+    """
+    from .ccusage_parser import (
+        daily_series,
+        model_breakdown_from_daily,
+        normalize_totals,
+    )
+
+    totals = normalize_totals(ccusage_session_raw)
+    models = model_breakdown_from_daily(ccusage_daily_raw)
+    daily = merge_daily(
+        daily_series(ccusage_daily_raw),
+        jsonl_summary.get("dailyTasks", []),
+        jsonl_summary.get("dailyActive", []),
+    )
+
+    total_tasks = jsonl_summary.get("totalTasks", 0)
+    total_active = jsonl_summary.get("totalActiveSeconds", 0)
+    avg_task = int(total_active / total_tasks) if total_tasks else 0
+
+    # Compute per-project tokens/cost by aligning on project name (best effort:
+    # ccusage gives us session ids without paths; we attribute costs by file count).
+    ccusage_session_totals = ccusage_session_raw.get("totals") or {}
+    ccusage_total_tokens = int(ccusage_session_totals.get("totalTokens", 0)) or 1
+    ccusage_total_cost = float(ccusage_session_totals.get("totalCost", 0.0)) or 0.0
+
+    projects_out: List[Dict[str, Any]] = []
+    for proj in jsonl_summary.get("projects", []):
+        share = (proj["files"] / max(1, jsonl_summary.get("filesScanned", 1)))
+        projects_out.append({
+            "project": proj["project"],
+            "projectPath": proj["projectPath"],
+            "tasks": proj["tasks"],
+            "activeSeconds": proj["activeSeconds"],
+            "activeHuman": _fmt_seconds(proj["activeSeconds"]),
+            "tokens": int(ccusage_total_tokens * share),
+            "cost": round(ccusage_total_cost * share, 4),
+            "files": proj["files"],
+        })
+
+    summary = {
+        "totalTokens": totals["totalTokens"],
+        "totalTasks": total_tasks,
+        "totalTime": total_active,                # seconds (raw)
+        "totalTimeHuman": _fmt_seconds(total_active),
+        "averageTask": avg_task,                  # seconds per task (raw)
+        "averageTaskHuman": _fmt_seconds(avg_task),
+        "mostUsedModel": most_used_model(models),
+        "totalCost": totals["totalCost"],
+    }
+
+    return {
+        "summary": summary,
+        "tokens": {
+            "total": totals["totalTokens"],
+            "input": totals["inputTokens"],
+            "output": totals["outputTokens"],
+            "cacheCreation": totals["cacheCreationTokens"],
+            "cacheRead": totals["cacheReadTokens"],
+            "cost": totals["totalCost"],
+        },
+        "models": [
+            {
+                "modelName": m["modelName"],
+                "totalTokens": m["totalTokens"],
+                "inputTokens": m["inputTokens"],
+                "outputTokens": m["outputTokens"],
+                "cost": m["cost"],
+                "sharePct": round(100 * m["totalTokens"] / ccusage_total_tokens, 1),
+            }
+            for m in models
+        ],
+        "tasks": {
+            "total": total_tasks,
+            "activeSeconds": total_active,
+            "activeHuman": _fmt_seconds(total_active),
+            "averageSeconds": avg_task,
+            "averageHuman": _fmt_seconds(avg_task),
+            "longestSeconds": max(
+                (p["activeSeconds"] // max(1, p["tasks"]) for p in projects_out if p["tasks"]),
+                default=0,
+            ),
+            "busiestDay": busiest_day(daily),
+        },
+        "projects": projects_out,
+        "dailyActivity": daily,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }

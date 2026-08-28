@@ -1,0 +1,1 @@
+"""Make collector a proper package so generate_statusboard.py can import it."""

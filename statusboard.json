@@ -1,0 +1,100 @@
+{
+  "summary": {
+    "totalTokens": 11839872,
+    "totalTasks": 53,
+    "totalTime": 13289,
+    "totalTimeHuman": "3h 41m",
+    "averageTask": 250,
+    "averageTaskHuman": "4m",
+    "mostUsedModel": {
+      "modelName": "MiniMax-M3",
+      "totalTokens": 11839872,
+      "sharePct": 100.0
+    },
+    "totalCost": 1.0253354400000005
+  },
+  "tokens": {
+    "total": 11839872,
+    "input": 711977,
+    "output": 126376,
+    "cacheCreation": 0,
+    "cacheRead": 11001519,
+    "cost": 1.0253354400000005
+  },
+  "models": [
+    {
+      "modelName": "MiniMax-M3",
+      "totalTokens": 11839872,
+      "inputTokens": 711977,
+      "outputTokens": 126376,
+      "cost": 1.0253354400000005,
+      "sharePct": 100.0
+    }
+  ],
+  "tasks": {
+    "total": 53,
+    "activeSeconds": 13289,
+    "activeHuman": "3h 41m",
+    "averageSeconds": 250,
+    "averageHuman": "4m",
+    "longestSeconds": 299,
+    "busiestDay": {
+      "date": "2026-08-27",
+      "tokens": 11033069,
+      "inputTokens": 648416,
+      "outputTokens": 110731,
+      "cacheCreationTokens": 0,
+      "cacheReadTokens": 10273922,
+      "cost": 0.9438373200000005,
+      "tasks": 43,
+      "activeSeconds": 12863
+    }
+  },
+  "projects": [
+    {
+      "project": "D:\\",
+      "projectPath": "D:\\",
+      "tasks": 43,
+      "activeSeconds": 12863,
+      "activeHuman": "3h 34m",
+      "tokens": 8879904,
+      "cost": 0.769,
+      "files": 3
+    },
+    {
+      "project": "cc-statusboard",
+      "projectPath": "C:\\Users\\910_2025\\APROGRAM\\cc-statusboard",
+      "tasks": 10,
+      "activeSeconds": 426,
+      "activeHuman": "7m",
+      "tokens": 2959968,
+      "cost": 0.2563,
+      "files": 1
+    }
+  ],
+  "dailyActivity": [
+    {
+      "date": "2026-08-27",
+      "tokens": 11033069,
+      "inputTokens": 648416,
+      "outputTokens": 110731,
+      "cacheCreationTokens": 0,
+      "cacheReadTokens": 10273922,
+      "cost": 0.9438373200000005,
+      "tasks": 43,
+      "activeSeconds": 12863
+    },
+    {
+      "date": "2026-08-28",
+      "tokens": 806803,
+      "inputTokens": 63561,
+      "outputTokens": 15645,
+      "cacheCreationTokens": 0,
+      "cacheReadTokens": 727597,
+      "cost": 0.08149812,
+      "tasks": 10,
+      "activeSeconds": 426
+    }
+  ],
+  "generatedAt": "2026-08-28T06:21:04.783913+00:00"
+}
