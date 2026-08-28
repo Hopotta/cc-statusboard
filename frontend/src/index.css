@@ -63,6 +63,42 @@
   @media (prefers-reduced-motion: reduce) {
     .live-dot { animation: none; }
   }
+
+  /* Heatmap cells: lift toward the cursor on hover. */
+  .heat-cell {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .heat-cell:hover {
+    position: relative;
+    z-index: 5;
+    transform: scale(1.7);
+    box-shadow: 0 0 0 1px rgba(230, 233, 239, 0.4);
+  }
+
+  /* Soft spotlight that tracks the cursor across the heatmap grid.
+     Position is fed via --mx / --my custom properties from JS. */
+  .heat-scope {
+    position: relative;
+  }
+  .heat-scope::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      110px circle at var(--mx, -999px) var(--my, -999px),
+      rgba(255, 122, 61, 0.07),
+      transparent 70%
+    );
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heat-cell,
+  .heat-cell:hover {
+    transition: none;
+    transform: none;
+  }
 }
 
 /* Custom scrollbar so the dark theme stays consistent. */
