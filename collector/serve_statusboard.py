@@ -55,10 +55,23 @@ class _SilentHandler(http.server.SimpleHTTPRequestHandler):
             sys.stderr.write("%s - %s\n" % (self.address_string(), format % args))
 
     def do_GET(self):  # noqa: N802
+        # The freshly generated statusboard.json lives in the project root;
+        # the served dist dir may hold a stale copy from a previous build.
+        url_path = self.path.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+        fresh_json = getattr(self.server, "fresh_json", None)
+        if url_path == "statusboard.json" and fresh_json is not None and fresh_json.exists():
+            body = fresh_json.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # Translate / to serve index.html for app routes.
         # If the requested path maps to a file, serve it; else fall back to index.html.
         root = Path(self.directory) if self.directory else Path.cwd()
-        url_path = self.path.split("?", 1)[0].split("#", 1)[0]
         target = (root / url_path.lstrip("/")).resolve()
         # Prevent path traversal.
         try:
@@ -86,6 +99,7 @@ class _SilentHandler(http.server.SimpleHTTPRequestHandler):
 class _ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
+    fresh_json: Path | None = None
 
 
 def _pick_free_port(preferred: int) -> int:
@@ -194,6 +208,7 @@ def main() -> int:
     port = _pick_free_port(args.port)
     handler = lambda *a, **kw: _SilentHandler(*a, directory=str(dist), **kw)
     httpd = _ThreadedServer(("127.0.0.1", port), handler)
+    httpd.fresh_json = out
 
     url = f"http://127.0.0.1:{port}/"
     print(f"\n[serve] cc-statusboard ready at {url}", file=sys.stderr)
