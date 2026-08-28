@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { DailyActivity } from "../types";
+import { localISODate } from "../utils/date";
 
 /**
  * Contribution-style heatmap of daily activity for the past ~365 days.
@@ -155,6 +156,8 @@ interface Cell {
 
 function buildYearGrid(days: DailyActivity[]): Cell[] {
   // Build a dense grid: one cell per day for the last ~365 days, ordered Sun..Sat.
+  // We key cells by the user's LOCAL date string so the lookup matches what the
+  // Python parser wrote (`dt.date().isoformat()` in local time).
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const start = new Date(today);
@@ -169,7 +172,7 @@ function buildYearGrid(days: DailyActivity[]): Cell[] {
   const cells: Cell[] = [];
   const cursor = new Date(start);
   while (cursor <= today) {
-    const iso = cursor.toISOString().slice(0, 10);
+    const iso = localISODate(cursor);
     const day = lookup.get(iso);
     cells.push({
       date: iso,

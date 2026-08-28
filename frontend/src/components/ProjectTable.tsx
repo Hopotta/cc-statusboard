@@ -16,7 +16,7 @@ export function ProjectTable({ projects }: { projects: ProjectStat[] }) {
     );
   }
 
-  const maxTasks = Math.max(...projects.map((p) => p.tasks));
+  const maxTasks = Math.max(1, ...projects.map((p) => p.tasks));
 
   return (
     <section className="panel p-5 sm:p-6 flex flex-col gap-4">

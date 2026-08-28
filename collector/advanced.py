@@ -139,7 +139,8 @@ def parse_tool_usage(root: Optional[Path] = None) -> Dict[str, Any]:
                     counts[name] += 1
                     if project_key:
                         by_project[project_key][name] += 1
-                    break  # one tool per assistant turn is the common shape
+                    # No break: Claude Code routinely issues parallel tool calls
+                    # in a single assistant message; each `tool_use` block counts.
 
     return {
         "tools": [
@@ -185,15 +186,17 @@ def parse_workflow_timeline(root: Optional[Path] = None,
             kind = line.get("type")
             if not ts or kind not in ("user", "assistant"):
                 continue
+            # Skip tool-result echoes (type=user with a toolUseResult): they would
+            # duplicate the tool_use event we already capture on the assistant side.
             if kind == "user" and "toolUseResult" in line:
-                kind = "tool"
+                continue
             if kind == "user":
                 text = _extract_text(line.get("message", {}).get("content", ""))
                 label = text[:80].replace("\n", " ").strip() or "(empty)"
                 events.append({"t": ts, "kind": "user", "label": label})
             elif kind == "assistant":
                 content = line.get("message", {}).get("content", [])
-                # If there's a tool_use, surface the tool name.
+                # If there's a tool_use, surface the tool name(s).
                 if isinstance(content, list):
                     tool_names = [b.get("name") for b in content
                                   if isinstance(b, dict) and b.get("type") == "tool_use"]
@@ -216,6 +219,39 @@ def parse_workflow_timeline(root: Optional[Path] = None,
                 "lastEvent": events[-1]["t"],
             })
     return {"sessions": out, "count": len(out)}
+
+
+def parse_task_durations(root: Optional[Path] = None) -> List[int]:
+    """Return the duration (in seconds) of each real user task across all sessions.
+
+    Each duration is `next_task_ts - this_task_ts`, capped at 2h per the spec.
+    Used to surface the actual longest task — not the longest project-average.
+    """
+    from datetime import datetime
+    from .jsonl_parser import MAX_TASK_DURATION_SECONDS, is_real_user_task
+
+    durations: List[int] = []
+    for fp in iter_jsonl_files(root):
+        entries = _safe_load(fp)
+        ts_list: List[datetime] = []
+        for e in entries:
+            if not is_real_user_task(e):
+                continue
+            t = e.get("timestamp")
+            if not t:
+                continue
+            try:
+                ts_list.append(datetime.fromisoformat(t.replace("Z", "+00:00")))
+            except (ValueError, AttributeError):
+                continue
+        for i in range(len(ts_list) - 1):
+            d = (ts_list[i + 1] - ts_list[i]).total_seconds()
+            if d < 0:
+                d = 0
+            if d > MAX_TASK_DURATION_SECONDS:
+                d = MAX_TASK_DURATION_SECONDS
+            durations.append(int(d))
+    return durations
 
 
 def parse_prompt_categories(root: Optional[Path] = None) -> Dict[str, Any]:
@@ -292,6 +328,7 @@ def parse_all(root: Optional[Path] = None,
     tools = parse_tool_usage(root)
     timeline = parse_workflow_timeline(root)
     prompts = parse_prompt_categories(root)
+    durations = parse_task_durations(root)
     efficiency = (
         parse_model_efficiency(ccusage_daily_raw or {}, jsonl_summary or {})
         if ccusage_daily_raw is not None and jsonl_summary is not None
@@ -301,6 +338,11 @@ def parse_all(root: Optional[Path] = None,
         "toolUsage": tools,
         "workflowTimeline": timeline,
         "promptCategories": prompts,
+        "taskDurations": {
+            "durations": durations,
+            "longest": max(durations) if durations else 0,
+            "count": len(durations),
+        },
         "modelEfficiency": efficiency,
     }
 

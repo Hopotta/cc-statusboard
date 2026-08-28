@@ -1,4 +1,4 @@
-import type { TaskStats } from "../types";
+import { ACCENT_CLASS, type Accent, type TaskStats } from "../types";
 import { formatSeconds } from "../utils/format";
 
 /**
@@ -74,16 +74,9 @@ function Cell({
 }: {
   label: string;
   value: string;
-  accent: "fg" | "signal" | "sun" | "mint";
+  accent: Accent;
 }) {
-  const cls =
-    accent === "signal"
-      ? "text-signal"
-      : accent === "sun"
-        ? "text-sun"
-        : accent === "mint"
-          ? "text-mint"
-          : "text-fg";
+  const cls = ACCENT_CLASS[accent];
   return (
     <div className="flex flex-col gap-1">
       <span className="eyebrow">{label}</span>

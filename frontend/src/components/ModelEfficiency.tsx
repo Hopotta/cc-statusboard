@@ -1,4 +1,4 @@
-import type { ModelEfficiency } from "../types";
+import { ACCENT_CLASS, type Accent, type ModelEfficiency } from "../types";
 import { formatPct, formatTokens, formatUSD } from "../utils/format";
 
 /**
@@ -71,10 +71,9 @@ function Stat({
 }: {
   label: string;
   value: string;
-  accent?: "mint" | "sun";
+  accent?: Accent;
 }) {
-  const cls =
-    accent === "mint" ? "text-mint" : accent === "sun" ? "text-sun" : "text-fg";
+  const cls = accent ? ACCENT_CLASS[accent] : "text-fg";
   return (
     <div className="flex flex-col gap-1">
       <span className="eyebrow">{label}</span>

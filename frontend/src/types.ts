@@ -36,6 +36,7 @@ export interface TaskStats {
   averageSeconds: number;
   averageHuman: string;
   longestSeconds: number;
+  longestAverageSeconds: number;
   busiestDay: { date: string; tasks: number; activeSeconds: number } | null;
 }
 
@@ -48,6 +49,7 @@ export interface ProjectStat {
   tokens: number;
   cost: number;
   files: number;
+  averageSeconds: number;
 }
 
 export interface DailyActivity {
@@ -73,6 +75,7 @@ export interface Statusboard {
     toolUsage: ToolUsage;
     workflowTimeline: WorkflowTimelinePayload;
     promptCategories: PromptCategoriesPayload;
+    taskDurations: TaskDurations;
     modelEfficiency: ModelEfficiency | null;
   };
   generatedAt: string;
@@ -127,3 +130,18 @@ export interface ModelEfficiency {
   totalTokens: number;
   totalCost: number;
 }
+
+export interface TaskDurations {
+  durations: number[];
+  longest: number;
+  count: number;
+}
+
+export type Accent = "signal" | "mint" | "sun" | "fg";
+
+export const ACCENT_CLASS: Record<Accent, string> = {
+  signal: "text-signal",
+  mint: "text-mint",
+  sun: "text-sun",
+  fg: "text-fg",
+};

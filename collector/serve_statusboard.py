@@ -28,6 +28,7 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
+from typing import Dict
 
 # Allow `python collector/serve_statusboard.py` from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -143,23 +144,31 @@ def main() -> int:
 
     # 3. Optionally start a watcher that regenerates on JSONL change.
     if args.watch:
+        import traceback
         from collector import jsonl_parser
 
         stop = threading.Event()
 
         def watcher() -> None:
-            seen = set(str(p) for p in jsonl_parser.iter_jsonl_files())
-            last_size = {}
-            for path in seen:
+            seen: set[str] = set()
+            last_size: Dict[str, int] = {}
+
+            def _seed(path_str: str) -> None:
                 try:
-                    last_size[path] = Path(path).stat().st_size
+                    last_size[path_str] = Path(path_str).stat().st_size
                 except OSError:
-                    last_size[path] = 0
+                    last_size[path_str] = 0
+
+            for path_str in (str(p) for p in jsonl_parser.iter_jsonl_files()):
+                seen.add(path_str)
+                _seed(path_str)
+
             while not stop.wait(3):
                 try:
                     current = set(str(p) for p in jsonl_parser.iter_jsonl_files())
                     changed = False
                     for path in current - seen:
+                        _seed(path)  # seed so next tick doesn't double-trigger
                         print(f"[watch] new session: {path}", file=sys.stderr)
                         changed = True
                     for path in current & seen:
@@ -175,8 +184,8 @@ def main() -> int:
                         payload = generate_statusboard.build_statusboard()
                         generate_statusboard.write_statusboard(out, payload)
                     seen = current
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[watch] error: {exc}", file=sys.stderr)
+                except Exception:  # noqa: BLE001
+                    traceback.print_exc()
 
         t = threading.Thread(target=watcher, name="jsonl-watcher", daemon=True)
         t.start()

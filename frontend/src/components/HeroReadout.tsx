@@ -14,6 +14,14 @@ export function HeroReadout({
   cost: number;
   generatedAt: string;
 }) {
+  // Use the actual host:port the dashboard was loaded from so the "Local" cell
+  // stays correct when the launcher is invoked with --port.
+  const port =
+    typeof window !== "undefined" && window.location.port
+      ? window.location.port
+      : "5173";
+  const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+
   return (
     <header className="relative panel overflow-hidden grid-bg">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-signal/60 to-transparent" />
@@ -49,7 +57,7 @@ export function HeroReadout({
             })}
           />
           <Ornament label="Source" value="ccusage · jsonl" />
-          <Ornament label="Local" value="localhost:3456" />
+          <Ornament label="Local" value={`${host}:${port}`} />
         </div>
       </div>
     </header>

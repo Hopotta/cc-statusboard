@@ -12,43 +12,36 @@ import { PromptCategories } from "./components/PromptCategories";
 import { ModelEfficiency } from "./components/ModelEfficiency";
 import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { formatSeconds, formatTokens, formatUSD, relativeTime } from "./utils/format";
+import { localISODate, diffDays } from "./utils/date";
 
 export default function App() {
   const { data, loading, error, lastUpdated, reload } = useStatusboard(5000);
 
   const streak = useMemo(() => {
     if (!data) return { current: 0, longest: 0 };
-    const days = data.dailyActivity;
+    const dates = new Set(data.dailyActivity.map((d) => d.date));
+
+    // Current streak: walk backwards from today (local) while the date is in the set.
     let current = 0;
-    let longest = 0;
-    let run = 0;
-    // Walk backwards from today to find current streak.
-    const today = new Date().toISOString().slice(0, 10);
-    const dates = new Set(days.map((d) => d.date));
-    let cursor = new Date();
-    while (dates.has(cursor.toISOString().slice(0, 10))) {
+    const cursor = new Date();
+    while (dates.has(localISODate(cursor))) {
       current += 1;
       cursor.setDate(cursor.getDate() - 1);
     }
-    // Longest streak by scanning sorted days.
-    const sorted = [...dates].sort();
-    for (const d of sorted) {
-      const dt = new Date(d);
-      if (!isNaN(dt.getTime())) {
-        // gap > 1 day resets
-        if (run === 0) run = 1;
-        else {
-          const prev = new Date(sorted[sorted.indexOf(d) - 1]);
-          const diffDays = Math.round(
-            (dt.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24),
-          );
-          if (diffDays === 1) run += 1;
-          else run = 1;
-        }
-        if (run > longest) longest = run;
+
+    // Longest streak: single linear pass over sorted dates.
+    let longest = 0;
+    let run = 0;
+    let prev: string | null = null;
+    for (const d of [...dates].sort()) {
+      if (prev && diffDays(prev, d) === 1) {
+        run += 1;
+      } else {
+        run = 1;
       }
+      if (run > longest) longest = run;
+      prev = d;
     }
-    void today;
     return { current, longest };
   }, [data]);
 

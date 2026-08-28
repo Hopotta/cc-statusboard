@@ -135,6 +135,7 @@ def aggregate(
     projects_out: List[Dict[str, Any]] = []
     for proj in jsonl_summary.get("projects", []):
         share = (proj["files"] / max(1, jsonl_summary.get("filesScanned", 1)))
+        proj_tasks = max(1, proj["tasks"])
         projects_out.append({
             "project": proj["project"],
             "projectPath": proj["projectPath"],
@@ -144,6 +145,7 @@ def aggregate(
             "tokens": int(ccusage_total_tokens * share),
             "cost": round(ccusage_total_cost * share, 4),
             "files": proj["files"],
+            "averageSeconds": int(proj["activeSeconds"] / proj_tasks),
         })
 
     summary = {
@@ -186,8 +188,14 @@ def aggregate(
             "activeHuman": _fmt_seconds(total_active),
             "averageSeconds": avg_task,
             "averageHuman": _fmt_seconds(avg_task),
-            "longestSeconds": max(
-                (p["activeSeconds"] // max(1, p["tasks"]) for p in projects_out if p["tasks"]),
+            # Real longest task from advanced analytics (falls back to project-mean).
+            "longestSeconds": (advanced or {}).get("taskDurations", {}).get("longest", 0)
+                or max(
+                    (p["averageSeconds"] for p in projects_out if p.get("tasks")),
+                    default=0,
+                ),
+            "longestAverageSeconds": max(
+                (p.get("averageSeconds", 0) for p in projects_out if p.get("tasks")),
                 default=0,
             ),
             "busiestDay": busiest_day(daily),

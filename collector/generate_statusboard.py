@@ -18,6 +18,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Dict
 
 # Allow `python collector/generate_statusboard.py` from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -49,14 +50,26 @@ def build_statusboard() -> dict:
 
 
 def write_statusboard(out_path: Path, payload: dict) -> None:
+    """Atomically write statusboard.json + mirror to frontend/public/.
+
+    Writes go through a `*.tmp` sibling and are renamed with os.replace so
+    concurrent readers (the dashboard polling every 5 s) never see a partial file.
+    """
+    import os
     out_path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, indent=2, ensure_ascii=False)
-    out_path.write_text(text, encoding="utf-8")
+
+    # Atomic write: tmp file in the same directory, then os.replace.
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, out_path)
 
     # Mirror to frontend/public/statusboard.json so the Vite dev server can serve it.
     try:
         PUBLIC_OUT.parent.mkdir(parents=True, exist_ok=True)
-        PUBLIC_OUT.write_text(text, encoding="utf-8")
+        tmp_pub = PUBLIC_OUT.with_suffix(PUBLIC_OUT.suffix + ".tmp")
+        tmp_pub.write_text(text, encoding="utf-8")
+        os.replace(tmp_pub, PUBLIC_OUT)
     except OSError as exc:
         print(f"[warn] could not write {PUBLIC_OUT}: {exc}", file=sys.stderr)
 
@@ -94,9 +107,18 @@ def main() -> int:
 
     # Simple polling watcher (avoids extra deps).  Detects new sessions quickly.
     print(f"[watch] watching {jsonl_parser.CLAUDE_PROJECTS_DIR} ...", file=sys.stderr)
-    seen = set(str(p) for p in jsonl_parser.iter_jsonl_files())
-    last_size = {p: jsonl_parser.CLAUDE_PROJECTS_DIR.joinpath(p).stat().st_size
-                 for p in seen}
+    seen: set[str] = set()
+    last_size: Dict[str, int] = {}
+
+    def _seed(path_str: str) -> None:
+        try:
+            last_size[path_str] = Path(path_str).stat().st_size
+        except OSError:
+            last_size[path_str] = 0
+
+    for path_str in (str(p) for p in jsonl_parser.iter_jsonl_files()):
+        seen.add(path_str)
+        _seed(path_str)
 
     try:
         while True:
@@ -105,10 +127,11 @@ def main() -> int:
             changed = False
             for p in current - seen:
                 changed = True
+                _seed(p)  # CRITICAL: seed so the next tick doesn't double-trigger
                 print(f"[watch] new session: {p}", file=sys.stderr)
             for p in current & seen:
                 try:
-                    size = jsonl_parser.CLAUDE_PROJECTS_DIR.joinpath(p).stat().st_size
+                    size = Path(p).stat().st_size
                 except OSError:
                     continue
                 if last_size.get(p) != size:

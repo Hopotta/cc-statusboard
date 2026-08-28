@@ -1,3 +1,5 @@
+import { ACCENT_CLASS, type Accent } from "../types";
+
 /**
  * Small metric tile.  Compact eyebrow label + big number + optional subline.
  * Used in the secondary metrics strip beneath the hero readout.
@@ -11,16 +13,9 @@ export function StatTile({
   label: string;
   value: string;
   sub?: string;
-  accent?: "signal" | "mint" | "sun" | "fg";
+  accent?: Accent;
 }) {
-  const accentClass =
-    accent === "signal"
-      ? "text-signal"
-      : accent === "mint"
-        ? "text-mint"
-        : accent === "sun"
-          ? "text-sun"
-          : "text-fg";
+  const accentClass = accent ? ACCENT_CLASS[accent] : "text-fg";
   return (
     <div className="panel px-5 py-4 flex flex-col gap-1.5">
       <span className="eyebrow">{label}</span>
