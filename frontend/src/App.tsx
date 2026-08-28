@@ -111,24 +111,22 @@ export default function App() {
               />
             </div>
 
-            {/* Heatmap */}
-            <ActivityHeatmap days={data.dailyActivity} />
-
-            {/* Token trend + models */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <TokenTrend days={data.dailyActivity} />
+            {/* Heatmap (narrowed) + tasks on its right */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+              <div className="lg:col-span-2 min-w-0">
+                <ActivityHeatmap days={data.dailyActivity} />
               </div>
-              <ModelDistribution models={data.models} />
-            </div>
-
-            {/* Tasks + project table */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <TasksPanel tasks={data.tasks} />
-              <div className="lg:col-span-2">
-                <ProjectTable projects={data.projects} />
-              </div>
             </div>
+
+            {/* Token throughput — standalone */}
+            <TokenTrend days={data.dailyActivity} />
+
+            {/* Models — standalone */}
+            <ModelDistribution models={data.models} />
+
+            {/* Project statusboard — standalone */}
+            <ProjectTable projects={data.projects} />
 
             {/* Phase 4: Advanced Analytics */}
             <SectionHeader

@@ -1,69 +1,201 @@
+import { useMemo, useState } from "react";
 import type { ModelStat } from "../types";
 import { formatTokens, formatPct, formatUSD } from "../utils/format";
 
 /**
- * Horizontal bar list of model usage.  Uses Recharts' BarChart on its side,
- * but because we're constrained to a compact list we hand-render the bars
- * for tighter typography control.
+ * Horizontal bar list of model usage.  Hand-rendered bars for tighter
+ * typography control.  Sortable by model (token share, default) or grouped
+ * by provider (OpenAI, DeepSeek, …).
  */
 export function ModelDistribution({ models }: { models: ModelStat[] }) {
+  const [sort, setSort] = useState<"model" | "provider">("model");
+
+  const providerGroups = useMemo(() => groupByProvider(models), [models]);
+
+  const toggle =
+    "font-mono text-[11px] px-2.5 py-1 rounded border transition-colors";
+
+  let body: React.ReactNode;
   if (!models.length) {
-    return (
-      <section className="panel p-5 sm:p-6">
-        <h2 className="eyebrow mb-3">Models</h2>
-        <p className="font-mono text-sm text-muted">No model data yet.</p>
-      </section>
+    body = <p className="font-mono text-sm text-muted">No model data yet.</p>;
+  } else if (sort === "model") {
+    const max = Math.max(...models.map((m) => m.totalTokens));
+    body = (
+      <ul className="grid md:grid-cols-2 md:gap-x-10 gap-y-3">
+        {models.map((m, idx) => (
+          <li key={m.modelName} className="flex flex-col gap-1.5 min-w-0">
+            <ModelRow
+              rank={String(idx + 1).padStart(2, "0")}
+              name={m.modelName}
+              provider={providerOf(m.modelName)}
+              pct={(m.totalTokens / max) * 100}
+              stat={m}
+            />
+          </li>
+        ))}
+      </ul>
+    );
+  } else {
+    body = (
+      <div className="flex flex-col gap-5">
+        {providerGroups.map((g) => {
+          const groupMax = Math.max(...g.models.map((m) => m.totalTokens));
+          return (
+            <div key={g.provider} className="flex flex-col gap-2.5">
+              <div className="flex items-baseline gap-3 border-b border-ink-700/70 pb-1.5">
+                <span className="eyebrow !text-fg">{g.provider}</span>
+                <span className="font-mono text-[10px] text-muted">
+                  {g.models.length} model{g.models.length === 1 ? "" : "s"} ·{" "}
+                  {formatTokens(g.total, 1)} tok · {formatPct(g.share)} of usage
+                </span>
+              </div>
+              <ul className="flex flex-col gap-2.5">
+                {g.models.map((m) => (
+                  <li key={m.modelName} className="flex flex-col gap-1.5 min-w-0">
+                    <ModelRow
+                      name={m.modelName}
+                      pct={(m.totalTokens / groupMax) * 100}
+                      stat={m}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
     );
   }
-  const max = Math.max(...models.map((m) => m.totalTokens));
 
   return (
     <section className="panel p-5 sm:p-6 flex flex-col gap-4">
-      <div className="flex items-baseline justify-between">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-3">
         <h2 className="font-mono text-sm tracking-widest2 uppercase text-muted">
           Models
         </h2>
-        <span className="eyebrow">by tokens</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSort("model")}
+            className={`${toggle} ${
+              sort === "model"
+                ? "text-signal border-signal/50"
+                : "text-muted border-ink-700 hover:border-signal/40 hover:text-signal"
+            }`}
+          >
+            by model
+          </button>
+          <button
+            type="button"
+            onClick={() => setSort("provider")}
+            className={`${toggle} ${
+              sort === "provider"
+                ? "text-signal border-signal/50"
+                : "text-muted border-ink-700 hover:border-signal/40 hover:text-signal"
+            }`}
+          >
+            by provider
+          </button>
+        </div>
       </div>
-      <ul className="flex flex-col gap-3">
-        {models.map((m, idx) => {
-          const pct = (m.totalTokens / max) * 100;
-          const share = m.sharePct;
-          return (
-            <li key={m.modelName} className="flex flex-col gap-1.5">
-              <div className="flex items-baseline justify-between gap-3">
-                <div className="flex items-baseline gap-2 min-w-0">
-                  <span className="font-mono text-[10px] text-muted w-6">
-                    {String(idx + 1).padStart(2, "0")}
-                  </span>
-                  <span className="font-mono text-sm text-fg truncate">
-                    {m.modelName}
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-3 shrink-0">
-                  <span className="font-mono text-[11px] text-muted">
-                    {formatUSD(m.cost)}
-                  </span>
-                  <span className="font-mono text-sm text-fg tnum w-16 text-right">
-                    {formatTokens(m.totalTokens, 2)}
-                  </span>
-                  <span className="font-mono text-sm text-signal tnum w-12 text-right">
-                    {formatPct(share)}
-                  </span>
-                </div>
-              </div>
-              <div className="relative h-1.5 bg-ink-800 rounded-sm overflow-hidden">
-                <div
-                  className="absolute inset-y-0 left-0 bg-signal"
-                  style={{ width: `${pct}%` }}
-                />
-                {/* Tick at 50%, 100% */}
-                <div className="absolute inset-y-0 left-1/2 w-px bg-ink-700" />
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      {body}
     </section>
   );
+}
+
+function ModelRow({
+  rank,
+  name,
+  provider,
+  pct,
+  stat,
+}: {
+  rank?: string;
+  name: string;
+  provider?: string;
+  pct: number;
+  stat: ModelStat;
+}) {
+  return (
+    <>
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-2 min-w-0">
+          {rank && (
+            <span className="font-mono text-[10px] text-muted w-6 shrink-0">
+              {rank}
+            </span>
+          )}
+          <span className="font-mono text-sm text-fg truncate">{name}</span>
+          {provider && (
+            <span className="font-mono text-[9px] uppercase tracking-widest2 text-muted/80 shrink-0">
+              {provider}
+            </span>
+          )}
+        </div>
+        <div className="flex items-baseline gap-3 shrink-0">
+          <span className="font-mono text-[11px] text-muted">{formatUSD(stat.cost)}</span>
+          <span className="font-mono text-sm text-fg tnum w-16 text-right">
+            {formatTokens(stat.totalTokens, 2)}
+          </span>
+          <span className="font-mono text-sm text-signal tnum w-12 text-right">
+            {formatPct(stat.sharePct)}
+          </span>
+        </div>
+      </div>
+      <div className="relative h-1.5 bg-ink-800 rounded-sm overflow-hidden">
+        <div
+          className="absolute inset-y-0 left-0 bg-signal"
+          style={{ width: `${pct}%` }}
+        />
+        {/* Tick at 50%, 100% */}
+        <div className="absolute inset-y-0 left-1/2 w-px bg-ink-700" />
+      </div>
+    </>
+  );
+}
+
+interface ProviderGroup {
+  provider: string;
+  models: ModelStat[];
+  total: number;
+  share: number;
+}
+
+function groupByProvider(models: ModelStat[]): ProviderGroup[] {
+  const map = new Map<string, ModelStat[]>();
+  let grandTotal = 0;
+  for (const m of models) {
+    const p = providerOf(m.modelName);
+    if (!map.has(p)) map.set(p, []);
+    map.get(p)!.push(m);
+    grandTotal += m.totalTokens;
+  }
+  const groups = [...map.entries()].map(([provider, ms]) => ({
+    provider,
+    // Tokens-descending inside each provider group.
+    models: [...ms].sort((a, b) => b.totalTokens - a.totalTokens),
+    total: ms.reduce((s, m) => s + m.totalTokens, 0),
+    share: grandTotal ? (ms.reduce((s, m) => s + m.totalTokens, 0) / grandTotal) * 100 : 0,
+  }));
+  // Biggest providers first.
+  return groups.sort((a, b) => b.total - a.total);
+}
+
+const PROVIDER_RULES: Array<[RegExp, string]> = [
+  [/claude|anthropic/i, "Anthropic"],
+  [/gpt|^o\d|codex|openai/i, "OpenAI"],
+  [/deepseek/i, "DeepSeek"],
+  [/minimax/i, "MiniMax"],
+  [/glm|zhipu|chatglm/i, "Zhipu"],
+  [/gemini|palm|bard/i, "Google"],
+  [/qwen|qwq/i, "Alibaba"],
+  [/mistral|mixtral/i, "Mistral"],
+  [/llama|meta/i, "Meta"],
+];
+
+function providerOf(modelName: string): string {
+  for (const [re, name] of PROVIDER_RULES) {
+    if (re.test(modelName)) return name;
+  }
+  return "Other";
 }
