@@ -25,3 +25,4 @@ data/raw/
 
 # Planning docs - kept locally, not for public repo
 cc-statusboard-plan.md
+tests/
