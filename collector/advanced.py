@@ -156,14 +156,17 @@ def parse_tool_usage(root: Optional[Path] = None) -> Dict[str, Any]:
 
 
 def parse_workflow_timeline(root: Optional[Path] = None,
-                             max_sessions: int = 10) -> Dict[str, Any]:
+                             max_sessions: int = 10,
+                             max_events_per_session: int = 80) -> Dict[str, Any]:
     """
     Build a coarse timeline of recent sessions.
 
     For each recent session we return an array of events:
         { t: ISO timestamp, kind: 'user'|'assistant'|'tool', label: str }
 
-    Capped at `max_sessions` to keep payload size sane.
+    Capped at `max_sessions` × `max_events_per_session` to keep payload size sane.
+    The strip view (front-end) and the detail view share the same events; if you
+    expand a session in the UI it shows the same events, no second fetch.
     """
     sessions: List[Tuple[float, Path]] = []
     for fp in iter_jsonl_files(root):
@@ -200,6 +203,11 @@ def parse_workflow_timeline(root: Optional[Path] = None,
                         continue
                 events.append({"t": ts, "kind": "assistant", "label": "reply"})
         if events:
+            # Trim to max_events_per_session, keeping first and last.
+            if len(events) > max_events_per_session:
+                head = events[:max_events_per_session // 2]
+                tail = events[-(max_events_per_session // 2):]
+                events = head + tail
             out.append({
                 "sessionId": fp.stem,
                 "file": str(fp),
@@ -223,7 +231,8 @@ def parse_prompt_categories(root: Optional[Path] = None) -> Dict[str, Any]:
             text = _extract_text(line.get("message", {}).get("content", ""))
             cat = _classify_prompt(text)
             counts[cat] += 1
-            if len(examples[cat]) < 3 and text.strip():
+            # Keep at most 1 example per category to keep JSON small.
+            if len(examples[cat]) < 1 and text.strip():
                 examples[cat].append(text[:120].replace("\n", " "))
 
     total = sum(counts.values()) or 1
