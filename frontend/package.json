@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview --port 3456 --host"
+    "preview": "vite preview --port 3456 --host",
+    "statusboard": "cd .. && python collector/serve_statusboard.py",
+    "statusboard:watch": "cd .. && python collector/serve_statusboard.py --watch",
+    "statusboard:build": "cd .. && python collector/generate_statusboard.py --once && vite build"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# cc-statusboard CLI launcher (POSIX).
+# Generates statusboard.json + serves the frontend on http://localhost:3456.
+#
+# Usage:
+#   cc-statusboard                # one-shot generate, then serve
+#   cc-statusboard --watch        # also watch JSONL files
+#   cc-statusboard --port 4000    # override port
+#   cc-statusboard --no-open      # don't open the browser
+#   cc-statusboard --dev          # use Vite dev server (with HMR)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+cd "$PROJECT_ROOT"
+exec python "$PROJECT_ROOT/collector/serve_statusboard.py" "$@"

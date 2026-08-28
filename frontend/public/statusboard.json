@@ -1,41 +1,41 @@
 {
   "summary": {
-    "totalTokens": 12677704,
-    "totalTasks": 54,
-    "totalTime": 13929,
-    "totalTimeHuman": "3h 52m",
-    "averageTask": 257,
+    "totalTokens": 18041130,
+    "totalTasks": 55,
+    "totalTime": 16415,
+    "totalTimeHuman": "4h 33m",
+    "averageTask": 298,
     "averageTaskHuman": "4m",
     "mostUsedModel": {
       "modelName": "MiniMax-M3",
-      "totalTokens": 12677704,
+      "totalTokens": 18041130,
       "sharePct": 100.0
     },
-    "totalCost": 1.0994741400000005
+    "totalCost": 1.4818140600000005
   },
   "tokens": {
-    "total": 12677704,
-    "input": 734181,
-    "output": 142639,
+    "total": 18041130,
+    "input": 918815,
+    "output": 156869,
     "cacheCreation": 0,
-    "cacheRead": 11800884,
-    "cost": 1.0994741400000005
+    "cacheRead": 16965446,
+    "cost": 1.4818140600000005
   },
   "models": [
     {
       "modelName": "MiniMax-M3",
-      "totalTokens": 12677704,
-      "inputTokens": 734181,
-      "outputTokens": 142639,
-      "cost": 1.0994741400000005,
+      "totalTokens": 18041130,
+      "inputTokens": 918815,
+      "outputTokens": 156869,
+      "cost": 1.4818140600000005,
       "sharePct": 100.0
     }
   ],
   "tasks": {
-    "total": 54,
-    "activeSeconds": 13929,
-    "activeHuman": "3h 52m",
-    "averageSeconds": 257,
+    "total": 55,
+    "activeSeconds": 16415,
+    "activeHuman": "4h 33m",
+    "averageSeconds": 298,
     "averageHuman": "4m",
     "longestSeconds": 299,
     "busiestDay": {
@@ -57,18 +57,18 @@
       "tasks": 43,
       "activeSeconds": 12863,
       "activeHuman": "3h 34m",
-      "tokens": 9508278,
-      "cost": 0.8246,
+      "tokens": 13530847,
+      "cost": 1.1114,
       "files": 3
     },
     {
       "project": "cc-statusboard",
       "projectPath": "C:\\Users\\910_2025\\APROGRAM\\cc-statusboard",
-      "tasks": 11,
-      "activeSeconds": 1066,
-      "activeHuman": "17m",
-      "tokens": 3169426,
-      "cost": 0.2749,
+      "tasks": 12,
+      "activeSeconds": 3552,
+      "activeHuman": "59m",
+      "tokens": 4510282,
+      "cost": 0.3705,
       "files": 1
     }
   ],
@@ -86,15 +86,15 @@
     },
     {
       "date": "2026-08-28",
-      "tokens": 1644635,
-      "inputTokens": 85765,
-      "outputTokens": 31908,
+      "tokens": 7008061,
+      "inputTokens": 270399,
+      "outputTokens": 46138,
       "cacheCreationTokens": 0,
-      "cacheReadTokens": 1526962,
-      "cost": 0.15563682000000004,
-      "tasks": 11,
-      "activeSeconds": 1066
+      "cacheReadTokens": 6691524,
+      "cost": 0.5379767400000001,
+      "tasks": 12,
+      "activeSeconds": 3552
     }
   ],
-  "generatedAt": "2026-08-28T06:25:52.317549+00:00"
+  "generatedAt": "2026-08-28T07:05:50.823762+00:00"
 }
