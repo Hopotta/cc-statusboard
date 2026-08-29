@@ -119,7 +119,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
 
       <div
         ref={areaRef}
-        className="heat-scope relative flex-1 flex items-center min-h-[120px]"
+        className="heat-scope relative flex-1 flex items-center min-h-[150px]"
         onMouseMove={onGridMouseMove}
         onMouseLeave={() => setHover(null)}
       >
@@ -169,11 +169,6 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
           </div>
         </div>
       </div>
-
-      <p className="font-mono text-[11px] text-muted">
-        Each column is one week, each cell one day —{" "}
-        <span className="text-signal">tok</span> intensity = tokens processed that day.
-      </p>
 
       {hover && (
         <div
