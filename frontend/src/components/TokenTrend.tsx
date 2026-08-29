@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -38,8 +38,22 @@ export function TokenTrend({ days }: { days: DailyActivity[] }) {
 
   const pickRange = (key: RangeKey) => {
     setRange(key);
-    if (key !== "custom") setOpenPicker(null);
+    // Jump straight into picking: opening the calendar for the user.
+    setOpenPicker(key === "custom" ? "from" : null);
   };
+
+  // Close on any outside mousedown.  Clicks on either date trigger stay
+  // untouched, so pressing the other date swaps pickers in one click.
+  useEffect(() => {
+    if (!openPicker) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (t && t.closest("[data-datepicker]")) return;
+      setOpenPicker(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [openPicker]);
 
   const filtered = useMemo(() => {
     if (range === "all") return days;
@@ -211,8 +225,21 @@ function DateField({
   open: boolean;
   onToggle: () => void;
 }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [flipX, setFlipX] = useState(false);
+  const [flipY, setFlipY] = useState(false);
+
+  // Flip the popover toward the page interior when the trigger sits near
+  // a viewport edge (narrow windows, bottom-docked panels).
+  useLayoutEffect(() => {
+    if (!open || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    setFlipX(r.left + 240 > window.innerWidth);
+    setFlipY(r.bottom + 280 > window.innerHeight && r.top > 300);
+  }, [open]);
+
   return (
-    <span className="relative">
+    <span ref={ref} data-datepicker className="relative">
       <button
         type="button"
         onClick={onToggle}
@@ -229,7 +256,13 @@ function DateField({
         {value || "yyyy-mm-dd"}
       </button>
       {open && (
-        <MiniCalendar value={value} onChange={onChange} onClose={onToggle} />
+        <MiniCalendar
+          value={value}
+          onChange={onChange}
+          onClose={onToggle}
+          flipX={flipX}
+          flipY={flipY}
+        />
       )}
     </span>
   );
@@ -241,10 +274,14 @@ function MiniCalendar({
   value,
   onChange,
   onClose,
+  flipX,
+  flipY,
 }: {
   value: string;
   onChange: (iso: string) => void;
   onClose: () => void;
+  flipX: boolean;
+  flipY: boolean;
 }) {
   const initial = value
     ? new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, 1)
@@ -252,6 +289,7 @@ function MiniCalendar({
   const [view, setView] = useState(
     () => new Date(initial.getFullYear(), initial.getMonth(), 1),
   );
+  const [yearOpen, setYearOpen] = useState(false);
 
   const y = view.getFullYear();
   const m = view.getMonth();
@@ -261,71 +299,112 @@ function MiniCalendar({
   const move = (delta: number) =>
     setView(new Date(view.getFullYear(), view.getMonth() + delta, 1));
 
+  const yearBtn =
+    "font-mono text-[11px] text-fg tracking-widest2 uppercase hover:text-signal transition-colors";
+  const years: number[] = [];
+  {
+    const cy = new Date().getFullYear();
+    for (let yy = cy; yy >= cy - 11; yy--) years.push(yy);
+  }
+
   const dayBtn =
     "w-7 h-7 flex items-center justify-center font-mono text-[10px] rounded-sm transition-colors";
 
   return (
-    <>
-      {/* Click-away catcher */}
-      <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute left-0 top-full mt-1 z-50 panel p-3 w-[232px] flex flex-col gap-2 shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            aria-label="Previous month"
-            onClick={() => move(-1)}
-            className="font-mono text-xs text-muted hover:text-signal px-1"
-          >
-            ‹
-          </button>
+    <div
+      className={`absolute z-50 panel p-3 w-[232px] flex flex-col gap-2 shadow-[0_8px_24px_rgba(0,0,0,0.5)] ${
+        flipX ? "right-0" : "left-0"
+      } ${flipY ? "bottom-full mb-1" : "top-full mt-1"}`}
+    >
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          aria-label="Previous month"
+          onClick={() => move(-1)}
+          className="font-mono text-xs text-muted hover:text-signal px-1"
+        >
+          ‹
+        </button>
+        <div className="flex items-baseline gap-2">
           <span className="font-mono text-[11px] text-fg tracking-widest2 uppercase">
-            {EN_MONTHS_LONG[m]} {y}
+            {EN_MONTHS_LONG[m]}
           </span>
-          <button
-            type="button"
-            aria-label="Next month"
-            onClick={() => move(1)}
-            className="font-mono text-xs text-muted hover:text-signal px-1"
-          >
-            ›
-          </button>
-        </div>
-
-        <div className="grid grid-cols-7">
-          {WEEKDAY_HEAD.map((w) => (
-            <span
-              key={w}
-              className="h-5 flex items-center justify-center font-mono text-[9px] text-muted uppercase"
+          <span className="relative">
+            <button
+              type="button"
+              aria-label="Pick year"
+              onClick={() => setYearOpen((v) => !v)}
+              className={`${yearBtn} ${yearOpen ? "text-signal" : ""}`}
             >
-              {w}
-            </span>
-          ))}
-          {Array.from({ length: firstWeekday }).map((_, i) => (
-            <span key={`pad-${i}`} />
-          ))}
-          {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
-            const iso = isoDate(y, m, d);
-            const selected = iso === value;
-            return (
-              <button
-                key={d}
-                type="button"
-                onClick={() => {
-                  onChange(iso);
-                  onClose();
-                }}
-                className={`${dayBtn} ${
-                  selected
-                    ? "bg-signal text-ink-950 font-semibold"
-                    : "text-fg hover:bg-ink-800"
-                }`}
-              >
-                {d}
-              </button>
-            );
-          })}
+              {y} ▾
+            </button>
+            {yearOpen && (
+              <div className="absolute right-0 top-full mt-1 z-10 panel py-1 w-[72px] max-h-44 overflow-y-auto shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
+                {years.map((yy) => (
+                  <button
+                    key={yy}
+                    type="button"
+                    onClick={() => {
+                      setView(new Date(yy, view.getMonth(), 1));
+                      setYearOpen(false);
+                    }}
+                    className={`w-full px-3 py-1 text-right font-mono text-[11px] transition-colors ${
+                      yy === y
+                        ? "text-signal"
+                        : "text-muted hover:text-fg hover:bg-ink-800"
+                    }`}
+                  >
+                    {yy}
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
         </div>
+        <button
+          type="button"
+          aria-label="Next month"
+          onClick={() => move(1)}
+          className="font-mono text-xs text-muted hover:text-signal px-1"
+        >
+          ›
+        </button>
       </div>
-    </>
+
+      <div className="grid grid-cols-7">
+        {WEEKDAY_HEAD.map((w) => (
+          <span
+            key={w}
+            className="h-5 flex items-center justify-center font-mono text-[9px] text-muted uppercase"
+          >
+            {w}
+          </span>
+        ))}
+        {Array.from({ length: firstWeekday }).map((_, i) => (
+          <span key={`pad-${i}`} />
+        ))}
+        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+          const iso = isoDate(y, m, d);
+          const selected = iso === value;
+          return (
+            <button
+              key={d}
+              type="button"
+              onClick={() => {
+                onChange(iso);
+                onClose();
+              }}
+              className={`${dayBtn} ${
+                selected
+                  ? "bg-signal text-ink-950 font-semibold"
+                  : "text-fg hover:bg-ink-800"
+              }`}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
