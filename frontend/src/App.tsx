@@ -113,7 +113,7 @@ export default function App() {
                 label="Cache Hit"
                 value={
                   data.advanced.modelEfficiency
-                    ? formatPct(data.advanced.modelEfficiency.cacheHitRate, 0)
+                    ? formatPct(data.advanced.modelEfficiency.cacheHitRate * 100, 1)
                     : "—"
                 }
                 sub="token reuse"
