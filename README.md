@@ -3,27 +3,31 @@
 A local Web Statusboard for **Claude Code** usage — token / cost / model / task / project
 analytics, with a mission-control-style UI built on top of your real session logs.
 
+![Dashboard screenshot](example.png)
+
 > Built on top of [`ccusage`](https://ccusage.com/) + Claude Code's JSONL session logs.
 > Owns its own intermediate data layer (`statusboard.json`) so the data sources stay
 > swappable (Claude Code, Codex, OpenCode, custom agents).
 
 ## What you get
 
-| Section                       | Source                    | What it shows                                              |
-| ----------------------------- | ------------------------- | ---------------------------------------------------------- |
-| **Hero readout**              | both                      | the single most important number — total tokens processed    |
-| **Metric strip**              | both                      | time · tasks · top model · streaks · spend                 |
-| **Activity heatmap**          | JSONL                     | 12-month contribution-style grid of tokens + tasks         |
-| **Token throughput**          | ccusage                   | daily token trend (area chart)                             |
-| **Model distribution**        | ccusage                   | share by model, with proportional spend                    |
-| **Tasks**                     | JSONL                     | total, average, longest, busiest day                       |
-| **Project statusboard**       | JSONL                     | per-project token/task/time table                          |
-| **Advanced analytics**        | both                      | tool usage, prompt categories, model efficiency, timeline  |
+| Section                 | Source  | What it shows                                                          |
+| ----------------------- | ------- | ---------------------------------------------------------------------- |
+| **Hero readout**        | both    | the single most important number — total tokens processed               |
+| **Metric strip**        | both    | time · tasks · top model · streak · spend · cache hit (6 tiles)         |
+| **Activity heatmap**    | JSONL   | last-6-months token grid; hover tooltip, cursor spotlight               |
+| **Token throughput**    | ccusage | daily token trend with selectable range (all / 1M / 3M / 6M / 1Y / custom dates) |
+| **Models**              | ccusage | per-model bars, or rollup by provider (OpenAI, DeepSeek, …)             |
+| **Tasks**               | JSONL   | total, average, longest, busiest day, hour-of-day distribution          |
+| **Project statusboard** | JSONL   | per-project token/task/time table                                       |
+| **Advanced analytics**  | both    | tool usage, prompt categories, model efficiency, workflow timeline      |
 
 All numbers are derived from your own `~/.claude/projects/*.jsonl` files and the
 `ccusage` JSON output — nothing is fabricated.
 
 ## Quick start
+
+Requires Python 3.9+ and Node 18+.
 
 ```bash
 # 1. Generate the data
@@ -65,12 +69,12 @@ cc-statusboard/
 │   └── serve_statusboard.py  # CLI: serve the built frontend + open browser
 ├── frontend/
 │   ├── src/                 # React + Vite + Tailwind + Recharts
-│   ├── public/              # statusboard.json lives here in dev
-│   └── dist/                # built artifacts (committed-friendly; gitignored)
+│   ├── public/              # statusboard.json is mirrored here in dev
+│   └── dist/                # build output
 ├── bin/
 │   ├── cc-statusboard       # POSIX launcher
 │   └── cc-statusboard.cmd   # Windows launcher
-├── statusboard.json         # the canonical data artefact (JSON)
+├── statusboard.json         # generated data artefact
 └── README.md
 ```
 
@@ -118,8 +122,6 @@ cc-statusboard/
 
 ## Task counting rule
 
-Per the plan:
-
 > A "task" is a real user message: `type=user` AND no `toolUseResult`.
 
 That filters out tool responses (which are echoed back as `type=user` too).
@@ -151,4 +153,4 @@ so Vite can serve it as a static file.
 
 ## License
 
-MIT — do whatever.
+[MIT](LICENSE) — do whatever.
