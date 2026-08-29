@@ -27,7 +27,7 @@ export function ModelDistribution({ models }: { models: ModelStat[] }) {
             <ModelRow
               rank={String(idx + 1).padStart(2, "0")}
               name={m.modelName}
-              provider={providerOf(m.modelName)}
+              note={providerOf(m.modelName)}
               pct={(m.totalTokens / max) * 100}
               stat={m}
             />
@@ -36,34 +36,25 @@ export function ModelDistribution({ models }: { models: ModelStat[] }) {
       </ul>
     );
   } else {
+    const max = Math.max(...providerGroups.map((g) => g.total));
     body = (
-      <div className="flex flex-col gap-5">
-        {providerGroups.map((g) => {
-          const groupMax = Math.max(...g.models.map((m) => m.totalTokens));
-          return (
-            <div key={g.provider} className="flex flex-col gap-2.5">
-              <div className="flex items-baseline gap-3 border-b border-ink-700/70 pb-1.5">
-                <span className="eyebrow !text-fg">{g.provider}</span>
-                <span className="font-mono text-[10px] text-muted">
-                  {g.models.length} model{g.models.length === 1 ? "" : "s"} ·{" "}
-                  {formatTokens(g.total, 1)} tok · {formatPct(g.share)} of usage
-                </span>
-              </div>
-              <ul className="flex flex-col gap-2.5">
-                {g.models.map((m) => (
-                  <li key={m.modelName} className="flex flex-col gap-1.5 min-w-0">
-                    <ModelRow
-                      name={m.modelName}
-                      pct={(m.totalTokens / groupMax) * 100}
-                      stat={m}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-      </div>
+      <ul className="flex flex-col gap-3">
+        {providerGroups.map((g, idx) => (
+          <li key={g.provider} className="flex flex-col gap-1.5 min-w-0">
+            <ModelRow
+              rank={String(idx + 1).padStart(2, "0")}
+              name={g.provider}
+              note={`${g.models.length} model${g.models.length === 1 ? "" : "s"}`}
+              pct={(g.total / max) * 100}
+              stat={{
+                totalTokens: g.total,
+                cost: g.cost,
+                sharePct: g.share,
+              }}
+            />
+          </li>
+        ))}
+      </ul>
     );
   }
 
@@ -106,15 +97,15 @@ export function ModelDistribution({ models }: { models: ModelStat[] }) {
 function ModelRow({
   rank,
   name,
-  provider,
+  note,
   pct,
   stat,
 }: {
   rank?: string;
   name: string;
-  provider?: string;
+  note?: string;
   pct: number;
-  stat: ModelStat;
+  stat: Pick<ModelStat, "totalTokens" | "cost" | "sharePct">;
 }) {
   return (
     <>
@@ -126,9 +117,9 @@ function ModelRow({
             </span>
           )}
           <span className="font-mono text-sm text-fg truncate">{name}</span>
-          {provider && (
+          {note && (
             <span className="font-mono text-[9px] uppercase tracking-widest2 text-muted/80 shrink-0">
-              {provider}
+              {note}
             </span>
           )}
         </div>
@@ -158,6 +149,7 @@ interface ProviderGroup {
   provider: string;
   models: ModelStat[];
   total: number;
+  cost: number;
   share: number;
 }
 
@@ -175,6 +167,7 @@ function groupByProvider(models: ModelStat[]): ProviderGroup[] {
     // Tokens-descending inside each provider group.
     models: [...ms].sort((a, b) => b.totalTokens - a.totalTokens),
     total: ms.reduce((s, m) => s + m.totalTokens, 0),
+    cost: ms.reduce((s, m) => s + m.cost, 0),
     share: grandTotal ? (ms.reduce((s, m) => s + m.totalTokens, 0) / grandTotal) * 100 : 0,
   }));
   // Biggest providers first.

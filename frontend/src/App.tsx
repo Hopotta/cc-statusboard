@@ -11,7 +11,7 @@ import { ToolUsage } from "./components/ToolUsage";
 import { PromptCategories } from "./components/PromptCategories";
 import { ModelEfficiency } from "./components/ModelEfficiency";
 import { WorkflowTimeline } from "./components/WorkflowTimeline";
-import { formatSeconds, formatTokens, formatUSD, relativeTime } from "./utils/format";
+import { formatSeconds, formatTokens, formatUSD, formatPct, relativeTime } from "./utils/format";
 import { localISODate, diffDays, formatDateTimeEn } from "./utils/date";
 
 export default function App() {
@@ -76,7 +76,7 @@ export default function App() {
             />
 
             {/* Secondary metric strip */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               <StatTile
                 label="Total Time"
                 value={formatSeconds(data.summary.totalTime)}
@@ -109,14 +109,25 @@ export default function App() {
                 value={formatUSD(data.tokens.cost)}
                 sub="cumulative"
               />
+              <StatTile
+                label="Cache Hit"
+                value={
+                  data.advanced.modelEfficiency
+                    ? formatPct(data.advanced.modelEfficiency.cacheHitRate, 0)
+                    : "—"
+                }
+                sub="token reuse"
+              />
             </div>
 
-            {/* Heatmap (narrowed) + tasks on its right */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-              <div className="lg:col-span-2 min-w-0">
+            {/* Heatmap fills its card and spreads its week columns; tasks keep a compact column */}
+            <div className="flex flex-col md:flex-row gap-6 items-stretch">
+              <div className="min-w-0 flex-1">
                 <ActivityHeatmap days={data.dailyActivity} />
               </div>
-              <TasksPanel tasks={data.tasks} />
+              <div className="min-w-0 md:w-80 xl:w-96 shrink-0">
+                <TasksPanel tasks={data.tasks} />
+              </div>
             </div>
 
             {/* Token throughput — standalone */}

@@ -7,7 +7,7 @@ import { formatSeconds } from "../utils/format";
  */
 export function TasksPanel({ tasks }: { tasks: TaskStats }) {
   return (
-    <section className="panel p-5 sm:p-6 flex flex-col gap-4">
+    <section className="panel p-5 sm:p-6 h-full flex flex-col gap-4">
       <div className="flex items-baseline justify-between">
         <h2 className="font-mono text-sm tracking-widest2 uppercase text-muted">
           Tasks

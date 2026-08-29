@@ -3,37 +3,61 @@ import type { DailyActivity } from "../types";
 import { localISODate, formatLongDateTimeEn } from "../utils/date";
 
 /**
- * Contribution-style heatmap of daily activity.
- * Two stacked rows per week: token activity on top, task activity below.
- * Cell color intensity scales with that day's value relative to its max.
+ * Contribution-style heatmap of daily token activity for the last 6 months.
+ * One row of week columns (7 stacked day-cells each); color intensity scales
+ * with that day's tokens relative to the max.
  *
- * The range is selectable (1–12 months, step 1). Cell size is constant so
- * switching ranges stretches the grid horizontally, never the cells.
+ * The grid fills whatever width/height the card gives it: cell size is the
+ * largest square that fits both axes (with small minimum gaps), and leftover
+ * space is distributed evenly between week columns (space-between), so the
+ * grid stretches from the left edge to the card's right padding.  Month
+ * labels use the same column pitch, so they stay aligned at any width.
  */
 
-const MONTHS_MIN = 1;
-const MONTHS_MAX = 12;
-
-// 10px cell + 4px gap — keep in sync with the cell classes below.
-const CELL = 10;
-const GAP = 4;
-const WEEK_W = 7 * CELL + 6 * GAP; // 94px
-const DAY_STEP = CELL + GAP; // 14px
-
-type Channel = "tokens" | "tasks";
+const MONTHS = 6;
+const ROW_LABEL_W = 28; // "tok" gutter (w-6 + gap-1)
+const DAYS = 7;
+const CELL_MIN = 4;
+const CELL_CAP = 22;
+// Gap scales with the cell so squares stay square-ish spaced at any width:
+// solving cell*weeks + ratio*cell*(weeks-1) = gridW for cell.
+const GAP_RATIO = 0.32;
+const GAP_MAX = 14;
 
 export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
-  const [months, setMonths] = useState(12);
-  const cells = useMemo(() => buildGrid(days, months), [days, months]);
+  const cells = useMemo(() => buildGrid(days, MONTHS), [days]);
   const monthLabels = useMemo(() => buildMonthLabels(cells), [cells]);
-
   const maxTokens = Math.max(1, ...cells.map((c) => c.tokens));
-  const maxTasks = Math.max(1, ...cells.map((c) => c.tasks));
 
-  const [hover, setHover] = useState<{ cell: Cell; channel: Channel } | null>(null);
+  const [hover, setHover] = useState<Cell | null>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef({ x: 0, y: 0 });
-  const gridRef = useRef<HTMLDivElement>(null);
+  const areaRef = useRef<HTMLDivElement>(null);
+  const [areaW, setAreaW] = useState(0);
+
+  // Track the grid area so the cells can fill it at any card width.
+  useLayoutEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const measure = () => setAreaW(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const weeks = Math.ceil(cells.length / DAYS);
+  const gridW = Math.max(0, areaW - ROW_LABEL_W);
+  // ONE gap value for both axes: cells and gaps stay identical horizontally
+  // and vertically at every card width (no flat rectangles, no squeezed rows).
+  const cell = Math.max(
+    CELL_MIN,
+    Math.min(Math.floor(gridW / (weeks + GAP_RATIO * (weeks - 1))), CELL_CAP),
+  );
+  const gap = Math.min((gridW - weeks * cell) / (weeks - 1), GAP_MAX);
+  const pitch = cell + gap;
+  const blockW = weeks * pitch - gap;
+  const blockH = DAYS * cell + (DAYS - 1) * gap;
 
   const placeTip = () => {
     const tip = tipRef.current;
@@ -68,7 +92,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
     if (hover) placeTip();
 
     // Cursor-following spotlight, via CSS vars so cells never re-render.
-    const el = gridRef.current;
+    const el = areaRef.current;
     if (el) {
       const r = el.getBoundingClientRect();
       el.style.setProperty("--mx", `${e.clientX - r.left}px`);
@@ -77,67 +101,78 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
   };
 
   return (
-    <section className="panel p-5 sm:p-6 flex flex-col gap-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-3">
+    <section className="panel p-5 sm:p-6 h-full flex flex-col gap-4 min-w-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
         <h2 className="font-mono text-sm tracking-widest2 uppercase text-muted">
-          Activity · last {months} month{months === 1 ? "" : "s"}
+          Activity · last {MONTHS} months
         </h2>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3 font-mono text-[10px] text-muted">
-            <span>less</span>
-            <Swatch tokens={0.05} maxTokens={1} tasks={0} maxTasks={1} />
-            <Swatch tokens={0.25} maxTokens={1} tasks={0.25} maxTasks={1} />
-            <Swatch tokens={0.5} maxTokens={1} tasks={0.5} maxTasks={1} />
-            <Swatch tokens={0.75} maxTokens={1} tasks={0.75} maxTasks={1} />
-            <Swatch tokens={1} maxTokens={1} tasks={1} maxTasks={1} />
-            <span>more</span>
-          </div>
-          <MonthStepper months={months} onChange={setMonths} />
+        <div className="flex items-center gap-3 font-mono text-[10px] text-muted shrink-0">
+          <span>less</span>
+          <Swatch ratio={0.05} />
+          <Swatch ratio={0.25} />
+          <Swatch ratio={0.5} />
+          <Swatch ratio={0.75} />
+          <Swatch ratio={1} />
+          <span>more</span>
         </div>
       </div>
 
       <div
-        className="overflow-x-auto heat-scope"
+        ref={areaRef}
+        className="heat-scope relative flex-1 flex items-center min-h-[120px]"
         onMouseMove={onGridMouseMove}
         onMouseLeave={() => setHover(null)}
       >
-        <div className="flex flex-col gap-2 min-w-fit">
-          {/* Month labels along the top */}
-          <div className="relative h-4 pl-7">
+        {/* One block holds labels + columns so they always share the pitch */}
+        <div className="relative" style={{ marginLeft: ROW_LABEL_W, width: blockW }}>
+          {/* Month labels along the top, aligned to the same column pitch */}
+          <div className="relative" style={{ height: 14, marginBottom: 6 }}>
             {monthLabels.map((m, i) => (
               <div
                 key={i}
                 className="absolute top-0 font-mono text-[10px] text-muted tracking-widest2 uppercase whitespace-nowrap"
-                style={{ left: 28 + m.x }}
+                style={{ left: m.col * pitch }}
               >
                 {m.label}
               </div>
             ))}
           </div>
-
-          {/* Two stacked rows: tokens (top), tasks (bottom) */}
-          <Row
-            label="tok"
-            cells={cells}
-            getValue={(c) => c.tokens}
-            max={maxTokens}
-            channel="tokens"
-            onEnter={(cell, channel) => setHover({ cell, channel })}
-          />
-          <Row
-            label="tsk"
-            cells={cells}
-            getValue={(c) => c.tasks}
-            max={maxTasks}
-            channel="tasks"
-            onEnter={(cell, channel) => setHover({ cell, channel })}
-          />
+          {/* Week columns — one uniform gap on both axes */}
+          <div className="flex" style={{ gap, height: blockH }}>
+            {weeksArr(weeks).map((_, wi) => (
+              <div
+                key={wi}
+                className="flex flex-col shrink-0"
+                style={{ gap, width: cell }}
+              >
+                {cells.slice(wi * DAYS, wi * DAYS + DAYS).map((c, di) => {
+                  const v = c.tokens;
+                  const ratio = maxTokens ? v / maxTokens : 0;
+                  const empty = c.date === "";
+                  return (
+                    <div
+                      key={di}
+                      onMouseEnter={empty ? undefined : () => setHover(c)}
+                      className={`heat-cell rounded-[2px] border border-ink-700 shrink-0 ${empty ? "opacity-0" : ""}`}
+                      style={{
+                        width: cell,
+                        height: cell,
+                        background: v
+                          ? rgba("signal", ratio)
+                          : "transparent",
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       <p className="font-mono text-[11px] text-muted">
-        Each week has two cells stacked vertically: <span className="text-signal">tok</span> for
-        tokens processed, <span className="text-mint">tsk</span> for tasks completed.
+        Each column is one week, each cell one day —{" "}
+        <span className="text-signal">tok</span> intensity = tokens processed that day.
       </p>
 
       {hover && (
@@ -145,14 +180,14 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
           ref={tipRef}
           className="fixed left-0 top-0 z-50 pointer-events-none will-change-transform"
         >
-          <HeatTooltip cell={hover.cell} channel={hover.channel} />
+          <HeatTooltip cell={hover} />
         </div>
       )}
     </section>
   );
 }
 
-function HeatTooltip({ cell, channel }: { cell: Cell; channel: Channel }) {
+function HeatTooltip({ cell }: { cell: Cell }) {
   const d = new Date(
     Number(cell.date.slice(0, 4)),
     Number(cell.date.slice(5, 7)) - 1,
@@ -164,130 +199,26 @@ function HeatTooltip({ cell, channel }: { cell: Cell; channel: Channel }) {
       <span className="font-mono text-xs text-fg whitespace-nowrap">
         {weekday} · {formatLongDateTimeEn(d).split(", ")[0]}
       </span>
-      <div className="flex flex-col gap-0.5 font-mono text-[11px]">
-        <span className={channel === "tokens" ? "text-signal" : "text-muted"}>
-          tok&nbsp;&nbsp;{cell.tokens.toLocaleString("en-US")}
-        </span>
-        <span className={channel === "tasks" ? "text-mint" : "text-muted"}>
-          tsk&nbsp;&nbsp;{cell.tasks.toLocaleString("en-US")}
-        </span>
-      </div>
+      <span className="font-mono text-[11px] text-signal">
+        tok&nbsp;&nbsp;{cell.tokens.toLocaleString("en-US")}
+      </span>
     </div>
   );
 }
 
 const WEEKDAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-function MonthStepper({
-  months,
-  onChange,
-}: {
-  months: number;
-  onChange: (n: number) => void;
-}) {
-  const btn =
-    "font-mono text-xs w-6 h-6 rounded border border-ink-700 text-muted hover:border-signal/60 hover:text-signal transition-colors disabled:opacity-30 disabled:hover:border-ink-700 disabled:hover:text-muted flex items-center justify-center";
-  return (
-    <div className="flex items-center gap-1.5 font-mono text-[11px] text-muted">
-      <button
-        type="button"
-        aria-label="Fewer months"
-        className={btn}
-        disabled={months <= MONTHS_MIN}
-        onClick={() => onChange(Math.max(MONTHS_MIN, months - 1))}
-      >
-        −
-      </button>
-      <span className="tnum w-16 text-center">
-        {months} {months === 1 ? "month" : "months"}
-      </span>
-      <button
-        type="button"
-        aria-label="More months"
-        className={btn}
-        disabled={months >= MONTHS_MAX}
-        onClick={() => onChange(Math.min(MONTHS_MAX, months + 1))}
-      >
-        +
-      </button>
-    </div>
-  );
-}
-
-function Swatch({
-  tokens,
-  maxTokens,
-  tasks,
-  maxTasks,
-}: {
-  tokens: number;
-  maxTokens: number;
-  tasks: number;
-  maxTasks: number;
-}) {
+function Swatch({ ratio }: { ratio: number }) {
   return (
     <span
       className="inline-block w-3 h-3 rounded-sm"
-      style={{
-        background: `linear-gradient(135deg, ${rgba("signal", tokens / maxTokens)}, ${rgba("mint", tasks / maxTasks)})`,
-      }}
+      style={{ background: rgba("signal", Math.max(0.05, ratio)) }}
     />
   );
 }
 
-function Row({
-  label,
-  cells,
-  getValue,
-  max,
-  channel,
-  onEnter,
-}: {
-  label: string;
-  cells: Cell[];
-  getValue: (c: Cell) => number;
-  max: number;
-  channel: Channel;
-  onEnter: (cell: Cell, channel: Channel) => void;
-}) {
-  // Sunday-first columns.  Build weeks.
-  const weeks: Cell[][] = [];
-  let week: Cell[] = [];
-  cells.forEach((c, i) => {
-    week.push(c);
-    if (week.length === 7 || i === cells.length - 1) {
-      weeks.push(week);
-      week = [];
-    }
-  });
-
-  return (
-    <div className="flex gap-1 items-center">
-      <span className="eyebrow w-6">{label}</span>
-      <div className="flex gap-1">
-        {weeks.map((w, wi) => (
-          <div key={wi} className="flex flex-col gap-1">
-            {w.map((c, di) => {
-              const v = getValue(c);
-              const ratio = max ? v / max : 0;
-              return (
-                <div
-                  key={di}
-                  onMouseEnter={() => onEnter(c, channel)}
-                  className="heat-cell w-[10px] h-[10px] rounded-[2px] border border-ink-700"
-                  style={{
-                    background: v
-                      ? rgba(channel === "tokens" ? "signal" : "mint", ratio)
-                      : "transparent",
-                  }}
-                />
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function weeksArr(n: number): number[] {
+  return Array.from({ length: n }, (_, i) => i);
 }
 
 interface Cell {
@@ -299,7 +230,9 @@ interface Cell {
 function buildGrid(days: DailyActivity[], months: number): Cell[] {
   // Dense grid: one cell per day from the Sunday on/before the first day of
   // (months - 1) months ago, through today.  Keyed by the user's LOCAL date
-  // string so the lookup matches what the Python parser wrote.
+  // string so the lookup matches what the Python parser wrote.  Padded with
+  // empty cells to a whole number of weeks so every column has exactly 7
+  // cells and the days line up horizontally.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const start = new Date(today.getFullYear(), today.getMonth() - (months - 1), 1);
@@ -320,24 +253,31 @@ function buildGrid(days: DailyActivity[], months: number): Cell[] {
     });
     cursor.setDate(cursor.getDate() + 1);
   }
+  while (cells.length % DAYS !== 0) {
+    cells.push({ date: "", tokens: 0, tasks: 0 });
+  }
   return cells;
 }
 
-function buildMonthLabels(cells: Cell[]): { label: string; x: number }[] {
-  const out: { label: string; x: number }[] = [];
+function buildMonthLabels(cells: Cell[]): { label: string; col: number }[] {
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const out: { label: string; col: number }[] = [];
   let prevMonth = -1;
   cells.forEach((c, i) => {
+    if (c.date === "") return;
     const m = Number(c.date.slice(5, 7));
     if (m !== prevMonth) {
-      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      const w = Math.floor(i / 7);
-      const d = i % 7;
-      out.push({ label: monthNames[m - 1] ?? "", x: w * WEEK_W + d * DAY_STEP });
+      out.push({ label: monthNames[m - 1] ?? "", col: Math.floor(i / DAYS) });
       prevMonth = m;
     }
   });
-  return out;
+  // A stray day-or-two of a month can sit right next to the next month's
+  // label (e.g. Aug 31 alone before a Sep-start grid) — drop the crowded
+  // label and keep the fuller month's, like GitHub does.
+  return out.filter(
+    (l, i) => !(i < out.length - 1 && out[i + 1].col - l.col < 2),
+  );
 }
 
 function rgba(channel: "signal" | "mint", ratio: number): string {
