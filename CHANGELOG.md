@@ -11,6 +11,10 @@ All notable changes to cc-statusboard will be documented in this file.
 - "Today" metric tile: tokens used today with a ±% vs-yesterday indicator (replaces the Current Streak tile)
 - ccusage outage resilience: when a data build fails, the server keeps serving the last known-good `statusboard.json` instead of refusing to start
 - Task-duration stats are emitted as fixed-size summaries (`longest` / `count` / `p50` / `p90`)
+- Stale-state signalling: while builds fail, responses carry an `X-Statusboard-Stale` header and the top bar shows "stale since HH:MM:SS — showing last known-good data"
+- ccusage output cache keyed by the JSONL input fingerprint — unchanged data skips the ccusage subprocesses entirely (startup ~55 s → ~4 s), the two ccusage calls run in parallel, and a failed refresh falls back to the stale cache
+- Prompt taxonomy expanded from 8 to 14 categories (`continue`, `git`, `run`, `ui`, `maintain`, `report` added) with colloquial synonym patterns mined from real "other" prompts — the "other" share drops from 59% to ~18%
+- Prompt categories panel shows a hint bar when the "other" bucket exceeds 40%, flagging the heuristic split as a rough hint
 
 ### Changed
 
@@ -18,9 +22,10 @@ All notable changes to cc-statusboard will be documented in this file.
 - Task definition tightened: system-injected user messages (`isMeta` caveats, slash-command expansions, interrupt placeholders) no longer count as tasks — task totals dropped ~35% and all task metrics now share one consistent population
 - "Cache hit" metric replaced by "Cache share" = `cache_read / (cache_read + cache_creation + input)`, computed once in the backend (the old read/(read+creation) ratio was systematically inflated)
 - Tool-usage per-project breakdown uses the same normalized project labels as the project table; subagent tool calls fold into the parent project
-- `statusboard.json` slimmed from 221 KB to ~150 KB (raw 6k-element task-duration array removed)
+- `statusboard.json` slimmed from 221 KB to ~72 KB: raw 6k-element task-duration array removed, compact serialization by default (`--pretty` to opt out), and no prompt text in the artifact (prompt-category examples and workflow-timeline prompt labels dropped)
 - The frontend skips re-rendering when a poll returns an unchanged `generatedAt`
 - The aggregator no longer imports ccusage under the hood — normalization happens in the build entrypoint
+- Advanced analytics reordered: Prompt categories and Tool usage (15 tools, always expanded) now sit above Model efficiency and Workflow timeline
 
 ### Fixed
 
@@ -29,6 +34,8 @@ All notable changes to cc-statusboard will be documented in this file.
 - The workflow timeline no longer lists subagent sidechain files as sessions
 - Files under `memory/` directories are never treated as session logs
 - Duplicate `TimelineEvent` / `TimelineSession` type definitions unified into `types.ts`
+- Background task notifications and list-shaped interrupt placeholders leaked into the task population (now filtered alongside the string-shaped ones)
+- Prompt-category bars could be squeezed to zero width in the third-width layout (rank column hidden below xl, label column resized)
 
 ## [0.2.0] - 2026-08-30
 
