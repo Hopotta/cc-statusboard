@@ -126,24 +126,40 @@ def aggregate(
     total_active = jsonl_summary.get("totalActiveSeconds", 0)
     avg_task = int(total_active / total_tasks) if total_tasks else 0
 
-    # Compute per-project tokens/cost by aligning on project name (best effort:
-    # ccusage gives us session ids without paths; we attribute costs by file count).
+    # Per-project tokens are measured directly from the JSONL usage records
+    # (see jsonl_parser.project_breakdown).  Cost is priced per model using
+    # unit prices derived from ccusage's daily modelBreakdowns, with the
+    # global average as fallback for models ccusage has no price data for.
     ccusage_session_totals = ccusage_session_raw.get("totals") or {}
     ccusage_total_tokens = int(ccusage_session_totals.get("totalTokens", 0)) or 1
-    ccusage_total_cost = float(ccusage_session_totals.get("totalCost", 0.0)) or 0.0
+    ccusage_total_cost = float(ccusage_session_totals.get("totalCost", 0.0))
+    avg_price = ccusage_total_cost / ccusage_total_tokens
+    price_by_model = {
+        m["modelName"]: m["cost"] / m["totalTokens"]
+        for m in models
+        if m["totalTokens"] > 0
+    }
 
     projects_out: List[Dict[str, Any]] = []
     for proj in jsonl_summary.get("projects", []):
-        share = (proj["files"] / max(1, jsonl_summary.get("filesScanned", 1)))
         proj_tasks = max(1, proj["tasks"])
+        proj_cost = 0.0
+        for name, usage in (proj.get("modelUsage") or {}).items():
+            model_tokens = (
+                usage.get("inputTokens", 0)
+                + usage.get("outputTokens", 0)
+                + usage.get("cacheCreationTokens", 0)
+                + usage.get("cacheReadTokens", 0)
+            )
+            proj_cost += model_tokens * price_by_model.get(name, avg_price)
         projects_out.append({
             "project": proj["project"],
             "projectPath": proj["projectPath"],
             "tasks": proj["tasks"],
             "activeSeconds": proj["activeSeconds"],
             "activeHuman": _fmt_seconds(proj["activeSeconds"]),
-            "tokens": int(ccusage_total_tokens * share),
-            "cost": round(ccusage_total_cost * share, 4),
+            "tokens": proj.get("tokens", 0),
+            "cost": round(proj_cost, 4),
             "files": proj["files"],
             "averageSeconds": int(proj["activeSeconds"] / proj_tasks),
         })

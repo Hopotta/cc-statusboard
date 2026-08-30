@@ -177,12 +177,43 @@ def project_breakdown(files: List[Path]) -> List[Dict[str, Any]]:
     for key, key_files in by_cwd.items():
         tasks_total = 0
         active_total = 0
+        tokens_total = 0
+        model_usage: Dict[str, Dict[str, int]] = {}
         first_cwd: Optional[str] = None
         for fp in key_files:
             entries = _safe_load(fp)
+            # Content blocks of one API response share a message.id and each
+            # carries the full usage; count each response exactly once.
+            seen_ids: set = set()
             for e in entries:
                 if first_cwd is None and e.get("cwd"):
                     first_cwd = e["cwd"]
+                if e.get("type") != "assistant":
+                    continue
+                msg = e.get("message") or {}
+                u = msg.get("usage")
+                if not u:
+                    continue
+                mid = msg.get("id")
+                if mid:
+                    if mid in seen_ids:
+                        continue
+                    seen_ids.add(mid)
+                inp = int(u.get("input_tokens", 0))
+                out = int(u.get("output_tokens", 0))
+                cc = int(u.get("cache_creation_input_tokens", 0))
+                cr = int(u.get("cache_read_input_tokens", 0))
+                tokens_total += inp + out + cc + cr
+                bucket = model_usage.setdefault(msg.get("model") or "unknown", {
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "cacheCreationTokens": 0,
+                    "cacheReadTokens": 0,
+                })
+                bucket["inputTokens"] += inp
+                bucket["outputTokens"] += out
+                bucket["cacheCreationTokens"] += cc
+                bucket["cacheReadTokens"] += cr
             ts = task_timestamps(entries)
             tasks_total += len(ts)
             active_total += compute_active_time(ts)
@@ -192,6 +223,8 @@ def project_breakdown(files: List[Path]) -> List[Dict[str, Any]]:
             "files": len(key_files),
             "tasks": tasks_total,
             "activeSeconds": active_total,
+            "tokens": tokens_total,
+            "modelUsage": model_usage,
         })
     rollup.sort(key=lambda x: x["tasks"], reverse=True)
     return rollup
