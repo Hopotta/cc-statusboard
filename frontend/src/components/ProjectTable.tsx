@@ -1,12 +1,39 @@
+import { useMemo, useState } from "react";
 import type { ProjectStat } from "../types";
 import { formatSeconds, formatTokens, formatUSD } from "../utils/format";
 
+type SortKey = "tokens" | "tasks" | "time" | "spend";
+
+const SORT_DEFS: Array<{
+  key: SortKey;
+  label: string;
+  get: (p: ProjectStat) => number;
+}> = [
+  { key: "tokens", label: "Tokens", get: (p) => p.tokens },
+  { key: "tasks", label: "Tasks", get: (p) => p.tasks },
+  { key: "time", label: "Time", get: (p) => p.activeSeconds },
+  { key: "spend", label: "Spend", get: (p) => p.cost },
+];
+
 /**
- * Project statusboard: a typographic table of projects with token / task / time
- * columns.  Sorted by tasks desc.  This is the section that benefits most from
- * tabular-nums and a hairline rule between rows.
+ * Project statusboard: a typographic table of projects.  Click a metric
+ * column header to sort by it (click again to flip direction).  Tabular-nums
+ * and a hairline rule between rows.
  */
 export function ProjectTable({ projects }: { projects: ProjectStat[] }) {
+  const [sortKey, setSortKey] = useState<SortKey>("tokens");
+  const [desc, setDesc] = useState(true);
+
+  const sorted = useMemo(() => {
+    const def = SORT_DEFS.find((d) => d.key === sortKey)!;
+    return [...projects].sort((a, b) => {
+      const delta = def.get(a) - def.get(b);
+      return (desc ? -delta : delta) || a.project.localeCompare(b.project);
+    });
+  }, [projects, sortKey, desc]);
+
+  const maxTasks = Math.max(1, ...projects.map((p) => p.tasks));
+
   if (!projects.length) {
     return (
       <section className="panel p-5 sm:p-6">
@@ -16,7 +43,14 @@ export function ProjectTable({ projects }: { projects: ProjectStat[] }) {
     );
   }
 
-  const maxTasks = Math.max(1, ...projects.map((p) => p.tasks));
+  const pickSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setDesc((v) => !v);
+    } else {
+      setSortKey(key);
+      setDesc(true);
+    }
+  };
 
   return (
     <section className="panel p-5 sm:p-6 flex flex-col gap-4">
@@ -32,14 +66,20 @@ export function ProjectTable({ projects }: { projects: ProjectStat[] }) {
           <thead>
             <tr className="border-b border-ink-700">
               <Th>Project</Th>
-              <Th className="text-right">Tokens</Th>
-              <Th className="text-right">Tasks</Th>
-              <Th className="text-right">Time</Th>
-              <Th className="text-right">Spend</Th>
+              {SORT_DEFS.map(({ key, label }) => (
+                <Th
+                  key={key}
+                  className="text-right cursor-pointer select-none hover:text-signal transition-colors"
+                  onClick={() => pickSort(key)}
+                  mark={sortKey === key ? (desc ? "↓" : "↑") : ""}
+                >
+                  {label}
+                </Th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {projects.map((p, idx) => (
+            {sorted.map((p, idx) => (
               <tr
                 key={`${p.project}-${idx}`}
                 className="border-b border-ink-700/60 hover:bg-ink-800/40 transition-colors"
@@ -87,16 +127,26 @@ export function ProjectTable({ projects }: { projects: ProjectStat[] }) {
 function Th({
   children,
   className = "",
+  mark = "",
+  onClick,
 }: {
   children: React.ReactNode;
   className?: string;
+  mark?: string;
+  onClick?: () => void;
 }) {
   return (
     <th
       className={`eyebrow py-3 px-4 font-normal ${className}`}
       scope="col"
+      onClick={onClick}
     >
       {children}
+      {mark && (
+        <span className="ml-1 text-signal font-mono" aria-hidden>
+          {mark}
+        </span>
+      )}
     </th>
   );
 }
