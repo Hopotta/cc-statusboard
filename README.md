@@ -14,12 +14,13 @@ analytics, with a mission-control-style UI built on top of your real session log
 | Section                 | Source  | What it shows                                                          |
 | ----------------------- | ------- | ---------------------------------------------------------------------- |
 | **Hero readout**        | both    | the single most important number — total tokens processed               |
-| **Metric strip**        | both    | time · tasks · top model · streak · spend · cache hit (6 tiles)         |
+| **Metric strip**        | both    | time · tasks · top model · today · spend · cache share (6 tiles)        |
 | **Activity heatmap**    | JSONL   | token heatmap with a 6-month viewport; drag to pan back through the full history |
-| **Token throughput**    | ccusage | daily token trend with selectable range (all / 1M / 3M / 6M / 1Y / custom dates) |
+| **Token throughput**    | ccusage | daily token trend with selectable range (all / 1M / 3M / 6M / 1Y / custom dates), stacked input/output/cache view and outlier markers |
 | **Models**              | ccusage | per-model bars, or rollup by provider (OpenAI, DeepSeek, …)             |
 | **Tasks**               | JSONL   | total, average, longest, busiest day, hour-of-day distribution          |
 | **Project statusboard** | JSONL   | per-project token/task/time table                                       |
+| **Sessions**            | JSONL   | per-session tokens/cost/tasks ranking (sortable)                        |
 | **Advanced analytics**  | both    | tool usage, prompt categories, model efficiency, workflow timeline      |
 
 All numbers are derived from your own `~/.claude/projects/*.jsonl` files and the
@@ -56,14 +57,14 @@ bin/cc-statusboard.cmd          # Windows
 cc-statusboard/
 ├── collector/
 │   ├── ccusage_parser.py     # wraps `ccusage` CLI, parses JSON
-│   ├── jsonl_parser.py       # walks ~/.claude/projects/, counts tasks & time
+│   ├── jsonl_parser.py       # single-pass scan of ~/.claude/projects/ (tasks, time, tokens)
+│   ├── advanced.py           # analytics from the scan (tools, prompts, efficiency, timeline)
 │   ├── aggregator.py         # joins both into statusboard.json
-│   ├── advanced.py           # Phase 4 analytics (tools, prompts, efficiency, timeline)
+│   ├── watcher.py            # shared JSONL change watcher (both CLI entrypoints)
 │   ├── generate_statusboard.py  # CLI: build + (optional) watch statusboard.json
 │   └── serve_statusboard.py  # CLI: serve the built frontend + open browser
 ├── frontend/
 │   ├── src/                 # React + Vite + Tailwind + Recharts
-│   ├── public/              # statusboard.json is mirrored here in dev
 │   └── dist/                # build output
 ├── bin/
 │   ├── cc-statusboard       # POSIX launcher
@@ -93,6 +94,9 @@ cc-statusboard/
                        "modelUsage": { "<model>": { "inputTokens", "outputTokens",
                                                     "cacheCreationTokens",
                                                     "cacheReadTokens" } } }, ... ],
+  "sessions":      [ { "sessionId", "project", "projectPath", "files", "tasks",
+                       "activeSeconds", "activeHuman", "tokens", "cost",
+                       "averageSeconds", "firstTs", "lastTs" }, ... ],
   "dailyActivity": [ { "date", "tokens", "inputTokens", "outputTokens",
                        "cacheCreationTokens", "cacheReadTokens", "cost",
                        "tasks", "activeSeconds" }, ... ],
@@ -101,8 +105,9 @@ cc-statusboard/
     "workflowTimeline": { "sessions": [...], "count" },
     "promptCategories": { "categories": [...], "total", "examples" },
     "modelEfficiency":  { "tokensPerTask", "costPerTask", "outputRatio",
-                          "cacheHitRate", "cacheReadTokens",
-                          "cacheCreationTokens", "totalTokens", "totalCost" }
+                          "cacheShare", "cacheReadTokens",
+                          "cacheCreationTokens", "inputTokens",
+                          "totalTokens", "totalCost" }
   },
   "generatedAt": "ISO-8601 UTC timestamp"
 }
@@ -122,9 +127,13 @@ cc-statusboard/
 
 ## Task counting rule
 
-> A "task" is a real user message: `type=user` AND no `toolUseResult`.
+> A "task" is a real user message: `type=user` AND no `toolUseResult`, AND
+> not system-injected (no `isMeta`, no `<command-*>` slash-command expansion,
+> no interrupt placeholder).
 
-That filters out tool responses (which are echoed back as `type=user` too).
+That filters out tool responses (which are echoed back as `type=user` too)
+and injected entries, so every task metric counts the same population of
+genuine user prompts.
 
 ## Active-time rule
 

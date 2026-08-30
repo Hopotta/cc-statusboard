@@ -2,6 +2,34 @@
 
 All notable changes to cc-statusboard will be documented in this file.
 
+## [0.3.0] - 2026-08-30
+
+### Added
+
+- Per-session analytics: every session gets a tokens/cost/tasks rollup (subagent sidechain logs fold into their parent session) with a sortable Sessions table answering "which session was the most expensive?"
+- Token throughput: a stacked mode showing the daily input / output / cache-read / cache-creation composition, plus outlier markers on days beyond mean + 2σ
+- "Today" metric tile: tokens used today with a ±% vs-yesterday indicator (replaces the Current Streak tile)
+- ccusage outage resilience: when a data build fails, the server keeps serving the last known-good `statusboard.json` instead of refusing to start
+- Task-duration stats are emitted as fixed-size summaries (`longest` / `count` / `p50` / `p90`)
+
+### Changed
+
+- Single-pass parsing pipeline: every JSONL file is read exactly once per rebuild (previously ~8 times); the JSONL change watcher is one shared implementation with a 10 s rebuild cooldown
+- Task definition tightened: system-injected user messages (`isMeta` caveats, slash-command expansions, interrupt placeholders) no longer count as tasks — task totals dropped ~35% and all task metrics now share one consistent population
+- "Cache hit" metric replaced by "Cache share" = `cache_read / (cache_read + cache_creation + input)`, computed once in the backend (the old read/(read+creation) ratio was systematically inflated)
+- Tool-usage per-project breakdown uses the same normalized project labels as the project table; subagent tool calls fold into the parent project
+- `statusboard.json` slimmed from 221 KB to ~150 KB (raw 6k-element task-duration array removed)
+- The frontend skips re-rendering when a poll returns an unchanged `generatedAt`
+- The aggregator no longer imports ccusage under the hood — normalization happens in the build entrypoint
+
+### Fixed
+
+- Token trend could render NaN when a custom range included a date that only had task data (daily slots lacked the token fields)
+- `normalize_totals` tolerates null / string numbers in ccusage output
+- The workflow timeline no longer lists subagent sidechain files as sessions
+- Files under `memory/` directories are never treated as session logs
+- Duplicate `TimelineEvent` / `TimelineSession` type definitions unified into `types.ts`
+
 ## [0.2.0] - 2026-08-30
 
 ### Added
