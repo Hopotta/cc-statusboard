@@ -114,11 +114,35 @@ def _pick_free_port(preferred: int) -> int:
             return s.getsockname()[1]
 
 
+def _dist_is_stale(dist: Path) -> bool:
+    """True when the dist bundle is missing or older than any frontend source."""
+    index = dist / "index.html"
+    if not index.exists():
+        return True
+    frontend = dist.parent
+    candidates: list[float] = []
+    for sub in ("src", "public"):
+        d = frontend / sub
+        if d.exists():
+            candidates.extend(
+                p.stat().st_mtime for p in d.rglob("*") if p.is_file()
+            )
+    for name in ("index.html", "vite.config.ts", "tailwind.config.js",
+                 "postcss.config.js", "package.json"):
+        f = frontend / name
+        if f.exists():
+            candidates.append(f.stat().st_mtime)
+    if not candidates:
+        return False
+    return max(candidates) > index.stat().st_mtime
+
+
 def _ensure_dist(dist: Path) -> Path:
-    """If frontend/dist doesn't exist, build it."""
-    if dist.exists() and (dist / "index.html").exists():
+    """Build the frontend when dist is missing or older than the sources."""
+    if dist.exists() and (dist / "index.html").exists() and not _dist_is_stale(dist):
         return dist
-    print(f"[serve] {dist} missing; building frontend …", file=sys.stderr)
+    reason = "missing" if not (dist / "index.html").exists() else "older than sources"
+    print(f"[serve] frontend {reason}; building …", file=sys.stderr)
     import subprocess
 
     frontend_dir = dist.parent
@@ -144,6 +168,8 @@ def main() -> int:
                    help="Regenerate statusboard.json on JSONL changes")
     p.add_argument("--no-open", action="store_true",
                    help="Don't open the browser automatically")
+    p.add_argument("--no-build", action="store_true",
+                   help="Serve dist as-is, skip the stale-frontend rebuild")
     p.add_argument("--source", type=Path, default=DEFAULT_DIST,
                    help="Static dir to serve (defaults to frontend/dist)")
     args = p.parse_args()
@@ -153,8 +179,8 @@ def main() -> int:
     out = PROJECT_ROOT / "statusboard.json"
     generate_statusboard.write_statusboard(out, payload)
 
-    # 2. Ensure the frontend has been built at least once.
-    dist = _ensure_dist(args.source)
+    # 2. Ensure the frontend is up to date with its sources.
+    dist = args.source if args.no_build else _ensure_dist(args.source)
 
     # 3. Optionally start a watcher that regenerates on JSONL change.
     if args.watch:
