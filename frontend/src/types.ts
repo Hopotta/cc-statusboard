@@ -71,6 +71,7 @@ export interface Statusboard {
   models: ModelStat[];
   tasks: TaskStats;
   projects: ProjectStat[];
+  sessions: SessionStat[];
   dailyActivity: DailyActivity[];
   advanced: {
     toolUsage: ToolUsage;
@@ -125,17 +126,35 @@ export interface ModelEfficiency {
   tokensPerTask: number;
   costPerTask: number;
   outputRatio: number;
-  cacheHitRate: number;
+  /** cache_read / (cache_read + cache_creation + plain input) */
+  cacheShare: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  inputTokens: number;
   totalTokens: number;
   totalCost: number;
 }
 
 export interface TaskDurations {
-  durations: number[];
   longest: number;
   count: number;
+  p50: number;
+  p90: number;
+}
+
+export interface SessionStat {
+  sessionId: string;
+  project: string;
+  projectPath: string | null;
+  files: number;
+  tasks: number;
+  activeSeconds: number;
+  activeHuman: string;
+  tokens: number;
+  cost: number;
+  averageSeconds: number;
+  firstTs: string | null;
+  lastTs: string | null;
 }
 
 export type Accent = "signal" | "mint" | "sun" | "fg";

@@ -1,19 +1,6 @@
 import { useState } from "react";
+import type { TimelineEvent, TimelineSession } from "../types";
 import { formatDateTimeEn, formatTimeEn } from "../utils/date";
-
-interface TimelineEvent {
-  t: string;
-  kind: "user" | "assistant" | "tool";
-  label: string;
-}
-
-interface TimelineSession {
-  sessionId: string;
-  file: string;
-  events: TimelineEvent[];
-  firstEvent: string;
-  lastEvent: string;
-}
 
 /**
  * Agent workflow timeline — visualises the user→assistant→tool sequence

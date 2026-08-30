@@ -10,13 +10,14 @@ interface UseStatusboardResult {
 }
 
 /**
- * Polls ./statusboard.json.  Vite serves the frontend from the parent directory's
- * static files? No — we set the dev server root to the parent so statusboard.json
- * is reachable at the root URL.
+ * Polls ./statusboard.json (served fresh by both the Python server and the
+ * Vite dev plugin — neither ever serves a stale copy).
  *
  * Each fetch is tagged with the current `tick`; if a slower older response
  * arrives after a newer one (e.g. during heavy regen), we ignore it so the UI
- * doesn't flicker back to a stale snapshot.
+ * doesn't flicker back to a stale snapshot.  Responses whose `generatedAt`
+ * matches the one already rendered are dropped, so a poll that finds no new
+ * data costs one fetch instead of a full re-render.
  */
 export function useStatusboard(intervalMs = 5000): UseStatusboardResult {
   const [data, setData] = useState<Statusboard | null>(null);
@@ -26,6 +27,7 @@ export function useStatusboard(intervalMs = 5000): UseStatusboardResult {
   const [tick, setTick] = useState(0);
   const tickRef = useRef(tick);
   tickRef.current = tick;
+  const generatedAtRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,6 +43,9 @@ export function useStatusboard(intervalMs = 5000): UseStatusboardResult {
         if (cancelled) return;
         // Only accept this response if it's still the current tick.
         if (epoch !== tickRef.current) return;
+        // Skip unchanged payloads (backend stamps every build with generatedAt).
+        if (json.generatedAt && json.generatedAt === generatedAtRef.current) return;
+        generatedAtRef.current = json.generatedAt;
         setData(json);
         setError(null);
         setLastUpdated(new Date());

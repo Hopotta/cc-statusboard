@@ -7,42 +7,27 @@ import { TokenTrend } from "./components/TokenTrend";
 import { ModelDistribution } from "./components/ModelDistribution";
 import { TasksPanel } from "./components/TasksPanel";
 import { ProjectTable } from "./components/ProjectTable";
+import { SessionTable } from "./components/SessionTable";
 import { ToolUsage } from "./components/ToolUsage";
 import { PromptCategories } from "./components/PromptCategories";
 import { ModelEfficiency } from "./components/ModelEfficiency";
 import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { formatSeconds, formatTokens, formatUSD, formatPct, relativeTime } from "./utils/format";
-import { localISODate, diffDays, formatDateTimeEn } from "./utils/date";
+import { localISODate, formatDateTimeEn } from "./utils/date";
 
 export default function App() {
   const { data, loading, error, lastUpdated, reload } = useStatusboard(5000);
 
-  const streak = useMemo(() => {
-    if (!data) return { current: 0, longest: 0 };
-    const dates = new Set(data.dailyActivity.map((d) => d.date));
-
-    // Current streak: walk backwards from today (local) while the date is in the set.
-    let current = 0;
-    const cursor = new Date();
-    while (dates.has(localISODate(cursor))) {
-      current += 1;
-      cursor.setDate(cursor.getDate() - 1);
-    }
-
-    // Longest streak: single linear pass over sorted dates.
-    let longest = 0;
-    let run = 0;
-    let prev: string | null = null;
-    for (const d of [...dates].sort()) {
-      if (prev && diffDays(prev, d) === 1) {
-        run += 1;
-      } else {
-        run = 1;
-      }
-      if (run > longest) longest = run;
-      prev = d;
-    }
-    return { current, longest };
+  // Today vs yesterday token usage (daily rows are UTC-keyed; the heatmap
+  // uses the same lookup convention).
+  const today = useMemo(() => {
+    if (!data) return null;
+    const byDate = new Map(data.dailyActivity.map((d) => [d.date, d]));
+    const todayRow = byDate.get(localISODate(new Date()));
+    const yCursor = new Date();
+    yCursor.setDate(yCursor.getDate() - 1);
+    const yesterdayRow = byDate.get(localISODate(yCursor));
+    return { todayRow, yesterdayRow };
   }, [data]);
 
   return (
@@ -100,9 +85,23 @@ export default function App() {
                 accent="sun"
               />
               <StatTile
-                label="Current Streak"
-                value={`${streak.current}d`}
-                sub={`longest ${streak.longest}d`}
+                label="Today"
+                value={
+                  today?.todayRow ? formatTokens(today.todayRow.tokens, 2) : "0"
+                }
+                sub={
+                  today?.todayRow
+                    ? today.yesterdayRow && today.yesterdayRow.tokens > 0
+                      ? (() => {
+                          const delta =
+                            ((today.todayRow!.tokens - today.yesterdayRow!.tokens) /
+                              today.yesterdayRow!.tokens) *
+                            100;
+                          return `${delta >= 0 ? "+" : ""}${delta.toFixed(0)}% vs yesterday`;
+                        })()
+                      : "no activity yesterday"
+                    : "no activity yet"
+                }
               />
               <StatTile
                 label="Spend"
@@ -110,13 +109,14 @@ export default function App() {
                 sub="cumulative"
               />
               <StatTile
-                label="Cache Hit"
+                label="Cache share"
                 value={
                   data.advanced.modelEfficiency
-                    ? formatPct(data.advanced.modelEfficiency.cacheHitRate * 100, 1)
+                    ? formatPct((data.advanced.modelEfficiency.cacheShare ?? 0) * 100, 1)
                     : "—"
                 }
-                sub="token reuse"
+                sub="of prompt tokens"
+                accent="mint"
               />
             </div>
 
@@ -138,6 +138,9 @@ export default function App() {
 
             {/* Project statusboard — standalone */}
             <ProjectTable projects={data.projects} />
+
+            {/* Per-session breakdown — standalone */}
+            <SessionTable sessions={data.sessions ?? []} />
 
             {/* Phase 4: Advanced Analytics */}
             <SectionHeader
@@ -220,7 +223,7 @@ function TopBar({
           <span className="font-mono text-sm tracking-widest2 uppercase">
             cc-statusboard
           </span>
-          <span className="eyebrow hidden sm:inline">v0.2</span>
+          <span className="eyebrow hidden sm:inline">v0.3</span>
         </div>
         <div className="flex items-center gap-4">
           <span className="font-mono text-[11px] text-muted">
@@ -302,7 +305,7 @@ function Footer({
       <FootCell label="Generated" value={formatDateTimeEn(new Date(generatedAt))} />
       <FootCell label="Top model" value={topModel} />
       <FootCell label="Total tokens" value={formatTokens(totalTokens, 2)} />
-      <FootCell label="Build" value="cc-statusboard v0.2" />
+      <FootCell label="Build" value="cc-statusboard v0.3" />
     </footer>
   );
 }

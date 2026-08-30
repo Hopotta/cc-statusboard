@@ -7,9 +7,12 @@ import { formatPct, formatTokens, formatUSD } from "../utils/format";
  * the model.
  */
 export function ModelEfficiency({ efficiency }: { efficiency: ModelEfficiency }) {
+  // Composition of cache tokens (read vs created) for the breakdown bar.
   const cacheTotal = efficiency.cacheReadTokens + efficiency.cacheCreationTokens;
-  const cacheShare =
+  const cacheBarShare =
     cacheTotal > 0 ? efficiency.cacheReadTokens / cacheTotal : 0;
+  // Prompt coverage metric is computed once in the backend.
+  const cacheShare = efficiency.cacheShare ?? 0;
 
   return (
     <section className="panel p-5 sm:p-6 flex flex-col gap-4">
@@ -24,7 +27,7 @@ export function ModelEfficiency({ efficiency }: { efficiency: ModelEfficiency })
         <Stat label="Tokens / task" value={formatTokens(efficiency.tokensPerTask, 1)} />
         <Stat label="Cost / task" value={formatUSD(efficiency.costPerTask)} />
         <Stat
-          label="Cache hit rate"
+          label="Cache share"
           value={formatPct(cacheShare * 100, 1)}
           accent="mint"
         />
@@ -40,12 +43,12 @@ export function ModelEfficiency({ efficiency }: { efficiency: ModelEfficiency })
         <div className="flex h-3 rounded-sm overflow-hidden border border-ink-700">
           <div
             className="bg-mint"
-            style={{ width: `${cacheShare * 100}%` }}
+            style={{ width: `${cacheBarShare * 100}%` }}
             title={`Cache read: ${formatTokens(efficiency.cacheReadTokens, 2)}`}
           />
           <div
             className="bg-sun"
-            style={{ width: `${(1 - cacheShare) * 100}%` }}
+            style={{ width: `${(1 - cacheBarShare) * 100}%` }}
             title={`Cache creation: ${formatTokens(efficiency.cacheCreationTokens, 2)}`}
           />
         </div>

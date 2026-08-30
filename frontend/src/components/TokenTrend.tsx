@@ -3,6 +3,8 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  Legend,
+  ReferenceDot,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -35,6 +37,7 @@ export function TokenTrend({ days }: { days: DailyActivity[] }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [openPicker, setOpenPicker] = useState<"from" | "to" | null>(null);
+  const [mode, setMode] = useState<"total" | "stacked">("total");
 
   const pickRange = (key: RangeKey) => {
     setRange(key);
@@ -69,16 +72,32 @@ export function TokenTrend({ days }: { days: DailyActivity[] }) {
     return days.filter((d) => d.date >= iso);
   }, [days, range, from, to]);
 
-  const data = filtered.map((d) => ({
-    date: d.date.slice(5), // MM-DD
-    fullDate: d.date,
-    tokens: d.tokens,
-    input: d.inputTokens,
-    output: d.outputTokens,
-    cache: d.cacheReadTokens + d.cacheCreationTokens,
-    cost: d.cost,
-    tasks: d.tasks,
-  }));
+  const data = useMemo(
+    () =>
+      filtered.map((d) => ({
+        date: d.date.slice(5), // MM-DD
+        fullDate: d.date,
+        tokens: d.tokens,
+        input: d.inputTokens,
+        output: d.outputTokens,
+        cacheRead: d.cacheReadTokens,
+        cacheCreation: d.cacheCreationTokens,
+        cost: d.cost,
+        tasks: d.tasks,
+      })),
+    [filtered],
+  );
+
+  // Outlier days: tokens beyond mean + 2σ of the selected range.
+  const anomalies = useMemo(() => {
+    if (data.length < 8) return [];
+    const mean = data.reduce((a, d) => a + d.tokens, 0) / data.length;
+    const sd = Math.sqrt(
+      data.reduce((a, d) => a + (d.tokens - mean) ** 2, 0) / data.length,
+    );
+    const cutoff = mean + 2 * sd;
+    return data.filter((d) => d.tokens > cutoff);
+  }, [data]);
 
   const btn =
     "font-mono text-[11px] px-2.5 py-1 rounded border transition-colors";
@@ -103,6 +122,23 @@ export function TokenTrend({ days }: { days: DailyActivity[] }) {
               {label}
             </button>
           ))}
+          <span className="flex items-center gap-2 ml-2">
+            {(["total", "stacked"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`${btn} ${mode === m ? btnOn : btnOff}`}
+              >
+                {m}
+              </button>
+            ))}
+            {anomalies.length > 0 && (
+              <span className="font-mono text-[10px] text-muted">
+                ◉ outlier &gt; μ+2σ
+              </span>
+            )}
+          </span>
           {range === "custom" && (
             <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted">
               <DateField
@@ -176,14 +212,48 @@ export function TokenTrend({ days }: { days: DailyActivity[] }) {
                 payload?.[0]?.payload?.fullDate ?? ""
               }
             />
-            <Area
-              type="monotone"
-              dataKey="tokens"
-              name="tokens"
-              stroke="#FF7A3D"
-              strokeWidth={1.5}
-              fill="url(#tokGradient)"
-            />
+            {mode === "stacked" ? (
+              <>
+                <Legend
+                  wrapperStyle={{
+                    fontFamily: "JetBrains Mono, monospace",
+                    fontSize: 10,
+                    color: "#8A93A1",
+                  }}
+                  iconType="plainrect"
+                  iconSize={8}
+                />
+                <Area type="monotone" dataKey="cacheRead" name="cache read" stackId="1"
+                  stroke="#6FE3C2" fill="#6FE3C2" fillOpacity={0.3} strokeWidth={1} />
+                <Area type="monotone" dataKey="input" name="input" stackId="1"
+                  stroke="#8A93A1" fill="#8A93A1" fillOpacity={0.25} strokeWidth={1} />
+                <Area type="monotone" dataKey="cacheCreation" name="cache creation" stackId="1"
+                  stroke="#FFB454" fill="#FFB454" fillOpacity={0.3} strokeWidth={1} />
+                <Area type="monotone" dataKey="output" name="output" stackId="1"
+                  stroke="#FF7A3D" fill="#FF7A3D" fillOpacity={0.35} strokeWidth={1} />
+              </>
+            ) : (
+              <Area
+                type="monotone"
+                dataKey="tokens"
+                name="tokens"
+                stroke="#FF7A3D"
+                strokeWidth={1.5}
+                fill="url(#tokGradient)"
+              />
+            )}
+            {anomalies.map((d) => (
+              <ReferenceDot
+                key={d.fullDate}
+                x={d.date}
+                y={d.tokens}
+                r={4}
+                fill="none"
+                stroke="#FF7A3D"
+                strokeWidth={1.5}
+                ifOverflow="extendDomain"
+              />
+            ))}
           </AreaChart>
         </ResponsiveContainer>
         </div>
