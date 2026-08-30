@@ -38,6 +38,7 @@ export interface TaskStats {
   longestSeconds: number;
   longestAverageSeconds: number;
   busiestDay: { date: string; tasks: number; activeSeconds: number } | null;
+  hourlyTasks: number[];
 }
 
 export interface ProjectStat {

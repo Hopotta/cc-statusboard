@@ -214,6 +214,7 @@ def aggregate(
                 (p.get("averageSeconds", 0) for p in projects_out if p.get("tasks")),
                 default=0,
             ),
+            "hourlyTasks": jsonl_summary.get("hourlyTasks", []),
             "busiestDay": busiest_day(daily),
         },
         "projects": projects_out,

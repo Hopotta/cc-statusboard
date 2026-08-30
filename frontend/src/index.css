@@ -91,11 +91,28 @@
       transparent 70%
     );
   }
+
+  /* Tasks hour-of-day bars: brighten and glow toward the cursor on hover,
+     growing from the baseline (items-end) instead of the bar's middle. */
+  .task-bar {
+    transition: transform 0.15s ease, background-color 0.15s ease,
+      box-shadow 0.15s ease;
+    transform-origin: bottom;
+  }
+  .task-bar:hover {
+    position: relative;
+    z-index: 5;
+    transform: scaleY(1.08);
+    background-color: rgba(255, 122, 61, 1);
+    box-shadow: 0 0 0 1px rgba(230, 233, 239, 0.4), 0 0 10px rgba(255, 122, 61, 0.45);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .heat-cell,
-  .heat-cell:hover {
+  .heat-cell:hover,
+  .task-bar,
+  .task-bar:hover {
     transition: none;
     transform: none;
   }

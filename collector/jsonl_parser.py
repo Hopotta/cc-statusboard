@@ -257,6 +257,7 @@ def parse_all(root: Optional[Path] = None) -> Dict[str, Any]:
     total_active_seconds = 0
     daily_tasks: Dict[str, int] = {}
     daily_active: Dict[str, int] = {}
+    hourly_tasks: Dict[int, int] = {}
 
     from datetime import datetime
 
@@ -276,6 +277,9 @@ def parse_all(root: Optional[Path] = None) -> Dict[str, Any]:
         for i, (iso_t, dt) in enumerate(parsed_ts):
             day = dt.date().isoformat()
             daily_tasks[day] = daily_tasks.get(day, 0) + 1
+            # Hour-of-day buckets use the user's LOCAL hour, not UTC.
+            local_hour = dt.astimezone().hour
+            hourly_tasks[local_hour] = hourly_tasks.get(local_hour, 0) + 1
             # Active seconds for this task on this day.
             if i + 1 < len(parsed_ts):
                 next_iso, next_dt = parsed_ts[i + 1]
@@ -293,6 +297,7 @@ def parse_all(root: Optional[Path] = None) -> Dict[str, Any]:
         "filesScanned": len(files),
         "dailyTasks": [{"date": d, "tasks": c} for d, c in sorted(daily_tasks.items())],
         "dailyActive": [{"date": d, "activeSeconds": s} for d, s in sorted(daily_active.items())],
+        "hourlyTasks": [hourly_tasks.get(h, 0) for h in range(24)],
     }
 
 

@@ -18,6 +18,7 @@ All notable changes to cc-statusboard will be documented in this file.
 - All dates rendered in pinned en-US formatting regardless of OS/browser locale; CJK font fallbacks added for unavoidable Chinese folder names
 - Activity heatmap redesigned as a fixed last-6-months, token-only grid that fills its card width with square cells, uniform gaps on both axes and month labels aligned to their columns; mouse-follow tooltip and cursor spotlight
 - Layout: Token throughput, Models and Project statusboard are standalone panels; Tasks sits beside Activity at equal height; metric strip expanded to six tiles (adds Cache Hit)
+- Tasks panel: the hour-of-day chart now renders the real task distribution (`tasks.hourlyTasks`, local-hour buckets) instead of a hardcoded placeholder shape, with a heatmap-style cursor-following tooltip showing the hour range and task count
 
 ### Fixed
 
