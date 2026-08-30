@@ -165,8 +165,8 @@ python collector/serve_statusboard.py --watch &      # gen + watch + serve on :3
 cd frontend && npm run dev                            # vite dev with HMR on :5173
 ```
 
-When you use the dev server, statusboard.json is mirrored into `frontend/public/`
-so Vite can serve it as a static file.
+Both the dev server (:5173) and the production server (:3456) read the same
+root `statusboard.json` — there is a single data artefact.
 
 ## License
 

@@ -22,6 +22,8 @@ All notable changes to cc-statusboard will be documented in this file.
 ### Fixed
 
 - Server served the stale `statusboard.json` baked into `frontend/dist` instead of the freshly generated root file
+- Vite dev server served a mirror copy (`frontend/public/statusboard.json`) that could go stale; dev and production now read the root `statusboard.json` directly — a single data artefact
+- Task-tool subagent logs were counted as standalone projects (25 fake `agent-*` worktree projects); they now fold into their parent project's tokens, and their prompts no longer count as user tasks
 - Cache Hit stat tile showed 1% instead of 99.5% (percent-scale bug)
 - Per-project tokens/cost were identical across all single-file projects (file-share estimation replaced by real measurement, see above)
 

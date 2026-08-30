@@ -20,7 +20,6 @@ Thumbs.db
 # Project artefacts - generated, not source
 statusboard.json
 statusboard.local.json
-frontend/public/statusboard.json
 data/raw/
 
 # Planning docs - kept locally, not for public repo

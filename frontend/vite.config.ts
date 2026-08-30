@@ -1,11 +1,32 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import fs from "node:fs";
 import path from "node:path";
 
+// Single data source: the root statusboard.json, the same file the Python
+// server serves in production.
+function freshStatusboard(): Plugin {
+  return {
+    name: "fresh-statusboard",
+    configureServer(server) {
+      server.middlewares.use("/statusboard.json", (_req, res) => {
+        const file = path.resolve(__dirname, "../statusboard.json");
+        if (!fs.existsSync(file)) {
+          res.statusCode = 404;
+          res.end("statusboard.json not found - run `python collector/generate_statusboard.py --once`");
+          return;
+        }
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Cache-Control", "no-store");
+        fs.createReadStream(file).pipe(res);
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), freshStatusboard()],
   root: ".",
-  publicDir: "public", // explicitly enable: statusboard.json is copied here
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),

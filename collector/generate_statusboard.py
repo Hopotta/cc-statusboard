@@ -27,9 +27,6 @@ from collector import aggregator, ccusage_parser, jsonl_parser  # noqa: E402
 from collector.advanced import parse_all as parse_advanced  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "statusboard.json"
-# Mirror copy for the Vite dev server. Vite only serves files inside its
-# project root, so we duplicate statusboard.json into frontend/public/.
-PUBLIC_OUT = Path(__file__).resolve().parent.parent / "frontend" / "public" / "statusboard.json"
 
 
 def build_statusboard() -> dict:
@@ -50,7 +47,7 @@ def build_statusboard() -> dict:
 
 
 def write_statusboard(out_path: Path, payload: dict) -> None:
-    """Atomically write statusboard.json + mirror to frontend/public/.
+    """Atomically write statusboard.json.
 
     Writes go through a `*.tmp` sibling and are renamed with os.replace so
     concurrent readers (the dashboard polling every 5 s) never see a partial file.
@@ -63,15 +60,6 @@ def write_statusboard(out_path: Path, payload: dict) -> None:
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, out_path)
-
-    # Mirror to frontend/public/statusboard.json so the Vite dev server can serve it.
-    try:
-        PUBLIC_OUT.parent.mkdir(parents=True, exist_ok=True)
-        tmp_pub = PUBLIC_OUT.with_suffix(PUBLIC_OUT.suffix + ".tmp")
-        tmp_pub.write_text(text, encoding="utf-8")
-        os.replace(tmp_pub, PUBLIC_OUT)
-    except OSError as exc:
-        print(f"[warn] could not write {PUBLIC_OUT}: {exc}", file=sys.stderr)
 
     s = payload.get("summary", {})
     print(
