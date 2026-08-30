@@ -65,6 +65,11 @@ class _SilentHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            # Tell the UI when the artifact is no longer being refreshed
+            # (build failures fall back to last-known-good silently).
+            stale_since = getattr(self.server, "stale_since", None)
+            if stale_since is not None:
+                self.send_header("X-Statusboard-Stale", str(int(stale_since)))
             self.end_headers()
             self.wfile.write(body)
             return
@@ -100,6 +105,7 @@ class _ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
     fresh_json: Path | None = None
+    stale_since: float | None = None  # unix ts of the last failed rebuild
 
 
 def _pick_free_port(preferred: int) -> int:
@@ -161,16 +167,18 @@ def _ensure_dist(dist: Path) -> Path:
     return dist
 
 
-def _ensure_fresh_json(out: Path) -> None:
+def _ensure_fresh_json(out: Path) -> bool:
     """Regenerate statusboard.json, falling back to the last known-good file.
 
     A ccusage failure (binary missing, offline, upstream hiccup) must not take
     the whole dashboard down — if a previous statusboard.json exists, keep
     serving it.  Only a first-ever run with no artifact at all re-raises.
+    Returns True when the artifact is fresh, False when serving last-known-good.
     """
     try:
         payload = generate_statusboard.build_statusboard()
         generate_statusboard.write_statusboard(out, payload)
+        return True
     except Exception as exc:  # noqa: BLE001
         if out.exists():
             print(
@@ -178,7 +186,7 @@ def _ensure_fresh_json(out: Path) -> None:
                 f"[serve] serving the last known-good {out.name}",
                 file=sys.stderr,
             )
-            return
+            return False
         raise
 
 
@@ -197,26 +205,34 @@ def main() -> int:
 
     # 1. Make sure statusboard.json is fresh before serving.
     out = PROJECT_ROOT / "statusboard.json"
-    _ensure_fresh_json(out)
+    fresh = _ensure_fresh_json(out)
 
     # 2. Ensure the frontend is up to date with its sources.
     dist = args.source if args.no_build else _ensure_dist(args.source)
 
-    # 3. Optionally start a watcher that regenerates on JSONL change.
-    if args.watch:
-        from collector.watcher import start_watcher
-
-        def watcher() -> None:
-            payload = generate_statusboard.build_statusboard()
-            generate_statusboard.write_statusboard(out, payload)
-
-        start_watcher(watcher, interval=3.0, cooldown=10.0)
-
-    # 4. Bind a free port and serve the dist dir.
+    # 3. Bind a free port and serve the dist dir.
     port = _pick_free_port(args.port)
     handler = lambda *a, **kw: _SilentHandler(*a, directory=str(dist), **kw)
     httpd = _ThreadedServer(("127.0.0.1", port), handler)
     httpd.fresh_json = out
+    httpd.stale_since = None if fresh else time.time()
+
+    # 4. Optionally watch for JSONL changes (needs the server instance so a
+    # failed rebuild can flip the stale marker the UI polls).
+    if args.watch:
+        from collector.watcher import start_watcher
+
+        def watcher() -> None:
+            try:
+                payload = generate_statusboard.build_statusboard()
+                generate_statusboard.write_statusboard(out, payload)
+                httpd.stale_since = None
+            except Exception:
+                if httpd.stale_since is None:
+                    httpd.stale_since = time.time()
+                raise  # watch_loop prints the traceback and keeps going
+
+        start_watcher(watcher, interval=3.0, cooldown=10.0)
 
     url = f"http://127.0.0.1:{port}/"
     print(f"\n[serve] cc-statusboard ready at {url}", file=sys.stderr)
