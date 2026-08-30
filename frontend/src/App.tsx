@@ -220,7 +220,7 @@ function TopBar({
           <span className="font-mono text-sm tracking-widest2 uppercase">
             cc-statusboard
           </span>
-          <span className="eyebrow hidden sm:inline">v0.1</span>
+          <span className="eyebrow hidden sm:inline">v0.2</span>
         </div>
         <div className="flex items-center gap-4">
           <span className="font-mono text-[11px] text-muted">
@@ -302,7 +302,7 @@ function Footer({
       <FootCell label="Generated" value={formatDateTimeEn(new Date(generatedAt))} />
       <FootCell label="Top model" value={topModel} />
       <FootCell label="Total tokens" value={formatTokens(totalTokens, 2)} />
-      <FootCell label="Build" value="cc-statusboard v0.1" />
+      <FootCell label="Build" value="cc-statusboard v0.2" />
     </footer>
   );
 }

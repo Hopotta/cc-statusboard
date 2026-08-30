@@ -75,6 +75,8 @@ cc-statusboard/
 │   ├── cc-statusboard       # POSIX launcher
 │   └── cc-statusboard.cmd   # Windows launcher
 ├── statusboard.json         # generated data artefact
+├── CHANGELOG.md
+├── LICENSE
 └── README.md
 ```
 
@@ -92,7 +94,10 @@ cc-statusboard/
   "tasks":         { "total", "activeSeconds", "activeHuman", "averageSeconds",
                      "averageHuman", "longestSeconds", "busiestDay" },
   "projects":      [ { "project", "projectPath", "tasks", "activeSeconds",
-                       "activeHuman", "tokens", "cost", "files" }, ... ],
+                       "activeHuman", "tokens", "cost", "files",
+                       "modelUsage": { "<model>": { "inputTokens", "outputTokens",
+                                                    "cacheCreationTokens",
+                                                    "cacheReadTokens" } } }, ... ],
   "dailyActivity": [ { "date", "tokens", "inputTokens", "outputTokens",
                        "cacheCreationTokens", "cacheReadTokens", "cost",
                        "tasks", "activeSeconds" }, ... ],
@@ -133,6 +138,18 @@ That filters out tool responses (which are echoed back as `type=user` too).
 
 The 2-hour cap is intentional: a session can stay open for days while the user is
 AFK; without a cap, "active time" would conflate wall-clock with effort.
+
+## Per-project token rule
+
+> Project tokens are measured directly from the `message.usage` records in each
+> JSONL file. Multiple content blocks of one API response share a `message.id`
+> and each carry the full usage — each response is counted exactly once.
+
+Per-project cost is priced per model using unit prices derived from ccusage's
+daily `modelBreakdowns` (models without pricing data fall back to the global
+average unit price). Because ccusage additionally deduplicates sessions resumed
+across files, the sum of project tokens sits slightly (~5%) below the ccusage
+global total by design.
 
 ## Adding a new agent
 
