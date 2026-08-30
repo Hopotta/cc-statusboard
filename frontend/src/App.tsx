@@ -13,10 +13,11 @@ import { PromptCategories } from "./components/PromptCategories";
 import { ModelEfficiency } from "./components/ModelEfficiency";
 import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { formatSeconds, formatTokens, formatUSD, formatPct, relativeTime } from "./utils/format";
-import { localISODate, formatDateTimeEn } from "./utils/date";
+import { localISODate, formatDateTimeEn, formatTimeEn } from "./utils/date";
 
 export default function App() {
-  const { data, loading, error, lastUpdated, reload } = useStatusboard(5000);
+  const { data, loading, error, lastUpdated, reload, staleSince } =
+    useStatusboard(5000);
 
   // Today vs yesterday token usage (daily rows are UTC-keyed; the heatmap
   // uses the same lookup convention).
@@ -38,6 +39,7 @@ export default function App() {
         onReload={reload}
         loading={loading}
         error={error}
+        staleSince={staleSince}
       />
 
       <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12 flex flex-col gap-8">
@@ -75,13 +77,9 @@ export default function App() {
                 accent="mint"
               />
               <StatTile
-                label="Most Used"
-                value={
-                  data.summary.mostUsedModel
-                    ? `${data.summary.mostUsedModel.sharePct.toFixed(0)}%`
-                    : "—"
-                }
-                sub={data.summary.mostUsedModel?.modelName ?? "no data"}
+                label="Projects"
+                value={String(data.projects.length)}
+                sub={`${(data.sessions ?? []).length} sessions logged`}
                 accent="sun"
               />
               <StatTile
@@ -150,13 +148,13 @@ export default function App() {
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <ToolUsage toolUsage={data.advanced.toolUsage} />
-              </div>
               <PromptCategories
                 categories={data.advanced.promptCategories.categories}
                 total={data.advanced.promptCategories.total}
               />
+              <div className="lg:col-span-2">
+                <ToolUsage toolUsage={data.advanced.toolUsage} />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -209,11 +207,13 @@ function TopBar({
   onReload,
   loading,
   error,
+  staleSince,
 }: {
   lastUpdated: Date | null;
   onReload: () => void;
   loading: boolean;
   error: string | null;
+  staleSince: Date | null;
 }) {
   return (
     <nav className="sticky top-0 z-10 border-b border-ink-700 bg-ink-950/80 backdrop-blur">
@@ -229,6 +229,10 @@ function TopBar({
           <span className="font-mono text-[11px] text-muted">
             {error ? (
               <span className="text-signal">error: {error}</span>
+            ) : staleSince ? (
+              <span className="text-signal">
+                stale since {formatTimeEn(staleSince)} — showing last known-good data
+              </span>
             ) : loading ? (
               "loading…"
             ) : (

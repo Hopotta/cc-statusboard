@@ -14,6 +14,7 @@ export function PromptCategories({
 }) {
   const ordered = [...categories].sort((a, b) => b.count - a.count);
   const max = Math.max(1, ...ordered.map((c) => c.count));
+  const other = categories.find((c) => c.slug === "other");
 
   return (
     <section className="panel p-5 sm:p-6 flex flex-col gap-4">
@@ -24,16 +25,23 @@ export function PromptCategories({
         <span className="eyebrow">{total} prompts</span>
       </div>
 
+      {other && other.sharePct > 40 && (
+        <p className="font-mono text-[11px] text-sun border border-sun/30 bg-sun/5 rounded px-3 py-2">
+          {other.sharePct.toFixed(0)}% of prompts match no heuristic category —
+          read the split as a rough hint, not ground truth.
+        </p>
+      )}
+
       <div className="flex flex-col gap-2">
         {ordered.map((c, idx) => (
-          <div key={c.slug} className="flex items-center gap-3">
-            <span className="font-mono text-[10px] text-muted w-6">
+          <div key={c.slug} className="flex items-center gap-2">
+            <span className="hidden xl:block font-mono text-[10px] text-muted w-5 shrink-0">
               {String(idx + 1).padStart(2, "0")}
             </span>
-            <span className="font-mono text-sm text-fg w-28 truncate">
+            <span className="font-mono text-sm text-fg w-36 xl:w-40 shrink-0 truncate">
               {c.label}
             </span>
-            <div className="relative flex-1 h-1.5 bg-ink-800 rounded-sm overflow-hidden">
+            <div className="relative flex-1 min-w-4 h-1.5 bg-ink-800 rounded-sm overflow-hidden">
               <div
                 className="absolute inset-y-0 left-0"
                 style={{
@@ -42,10 +50,10 @@ export function PromptCategories({
                 }}
               />
             </div>
-            <span className="font-mono text-xs text-fg tnum w-8 text-right">
+            <span className="font-mono text-xs text-fg tnum w-8 text-right shrink-0">
               {c.count}
             </span>
-            <span className="font-mono text-[11px] text-muted tnum w-12 text-right">
+            <span className="font-mono text-[11px] text-muted tnum w-10 text-right shrink-0">
               {c.sharePct.toFixed(0)}%
             </span>
           </div>

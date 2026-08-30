@@ -119,7 +119,6 @@ export interface PromptCategory {
 export interface PromptCategoriesPayload {
   categories: PromptCategory[];
   total: number;
-  examples: Record<string, string[]>;
 }
 
 export interface ModelEfficiency {

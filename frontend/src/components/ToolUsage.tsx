@@ -18,8 +18,9 @@ export function ToolUsage({ toolUsage }: Props) {
         </span>
       </div>
 
+      {/* 15 rows to match the Prompt categories panel's height side by side. */}
       <ul className="flex flex-col gap-2">
-        {toolUsage.tools.slice(0, 12).map((t, idx) => {
+        {toolUsage.tools.slice(0, 15).map((t, idx) => {
           const pct = (t.count / max) * 100;
           return (
             <li key={t.name} className="flex items-center gap-3">
@@ -27,7 +28,7 @@ export function ToolUsage({ toolUsage }: Props) {
                 {String(idx + 1).padStart(2, "0")}
               </span>
               <span className="font-mono text-sm text-fg w-32 truncate">{t.name}</span>
-              <div className="relative flex-1 h-1.5 bg-ink-800 rounded-sm overflow-hidden">
+              <div className="relative flex-1 min-w-4 h-1.5 bg-ink-800 rounded-sm overflow-hidden">
                 <div
                   className="absolute inset-y-0 left-0 bg-mint"
                   style={{ width: `${pct}%` }}
@@ -42,7 +43,7 @@ export function ToolUsage({ toolUsage }: Props) {
       </ul>
 
       {Object.keys(toolUsage.byProject).length > 0 && (
-        <details className="mt-2">
+        <details className="mt-auto">
           <summary className="eyebrow cursor-pointer hover:text-fg transition-colors">
             by project ({Object.keys(toolUsage.byProject).length})
           </summary>

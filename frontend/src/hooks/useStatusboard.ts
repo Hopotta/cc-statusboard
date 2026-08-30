@@ -7,6 +7,8 @@ interface UseStatusboardResult {
   error: string | null;
   reload: () => void;
   lastUpdated: Date | null;
+  /** Set when the backend stopped refreshing the artifact (build failures). */
+  staleSince: Date | null;
 }
 
 /**
@@ -17,13 +19,16 @@ interface UseStatusboardResult {
  * arrives after a newer one (e.g. during heavy regen), we ignore it so the UI
  * doesn't flicker back to a stale snapshot.  Responses whose `generatedAt`
  * matches the one already rendered are dropped, so a poll that finds no new
- * data costs one fetch instead of a full re-render.
+ * data costs one fetch instead of a full re-render.  The `X-Statusboard-Stale`
+ * response header (set while builds fail) always updates `staleSince`, even
+ * on otherwise-unchanged payloads.
  */
 export function useStatusboard(intervalMs = 5000): UseStatusboardResult {
   const [data, setData] = useState<Statusboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [staleSince, setStaleSince] = useState<Date | null>(null);
   const [tick, setTick] = useState(0);
   const tickRef = useRef(tick);
   tickRef.current = tick;
@@ -32,17 +37,22 @@ export function useStatusboard(intervalMs = 5000): UseStatusboardResult {
   useEffect(() => {
     let cancelled = false;
     const epoch = tickRef.current;
+    let pendingStale: Date | null = null;
     const url = `./statusboard.json?ts=${Date.now()}`;
 
     fetch(url, { cache: "no-store" })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const stale = Number(r.headers.get("X-Statusboard-Stale"));
+        pendingStale =
+          Number.isFinite(stale) && stale > 0 ? new Date(stale * 1000) : null;
         return r.json();
       })
       .then((json: Statusboard) => {
         if (cancelled) return;
         // Only accept this response if it's still the current tick.
         if (epoch !== tickRef.current) return;
+        setStaleSince(pendingStale);
         // Skip unchanged payloads (backend stamps every build with generatedAt).
         if (json.generatedAt && json.generatedAt === generatedAtRef.current) return;
         generatedAtRef.current = json.generatedAt;
@@ -76,5 +86,6 @@ export function useStatusboard(intervalMs = 5000): UseStatusboardResult {
     error,
     reload: () => setTick((t) => t + 1),
     lastUpdated,
+    staleSince,
   };
 }
