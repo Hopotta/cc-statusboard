@@ -15,7 +15,7 @@ analytics, with a mission-control-style UI built on top of your real session log
 | ----------------------- | ------- | ---------------------------------------------------------------------- |
 | **Hero readout**        | both    | the single most important number — total tokens processed               |
 | **Metric strip**        | both    | time · tasks · top model · streak · spend · cache hit (6 tiles)         |
-| **Activity heatmap**    | JSONL   | last-6-months token grid; hover tooltip, cursor spotlight               |
+| **Activity heatmap**    | JSONL   | token heatmap with a 6-month viewport; drag to pan back through the full history |
 | **Token throughput**    | ccusage | daily token trend with selectable range (all / 1M / 3M / 6M / 1Y / custom dates) |
 | **Models**              | ccusage | per-model bars, or rollup by provider (OpenAI, DeepSeek, …)             |
 | **Tasks**               | JSONL   | total, average, longest, busiest day, hour-of-day distribution          |
@@ -27,16 +27,10 @@ All numbers are derived from your own `~/.claude/projects/*.jsonl` files and the
 
 ## Quick start
 
-Requires Python 3.9+ and Node 18+.
+Requires Python 3.9+ and Node 18+ (run `npm install` inside `frontend/` once).
 
 ```bash
-# 1. Generate the data
-python collector/generate_statusboard.py --once
-
-# 2. Build the frontend (or use the launcher, which does this for you)
-cd frontend && npm install && npm run build && cd ..
-
-# 3. Serve the dashboard
+# Data generation and stale-frontend rebuilds are handled automatically.
 python collector/serve_statusboard.py --port 3456
 # open http://127.0.0.1:3456
 ```

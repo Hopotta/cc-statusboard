@@ -19,6 +19,8 @@ All notable changes to cc-statusboard will be documented in this file.
 - Activity heatmap redesigned as a fixed last-6-months, token-only grid that fills its card width with square cells, uniform gaps on both axes and month labels aligned to their columns; mouse-follow tooltip and cursor spotlight
 - Layout: Token throughput, Models and Project statusboard are standalone panels; Tasks sits beside Activity at equal height; metric strip expanded to six tiles (adds Cache Hit)
 - Tasks panel: the hour-of-day chart now renders the real task distribution (`tasks.hourlyTasks`, local-hour buckets) instead of a hardcoded placeholder shape, with a heatmap-style cursor-following tooltip showing the hour range and task count
+- Activity heatmap: the viewport keeps its 6-month size but the grid now spans the full history with a six-month empty lead-in — drag or touchpad-scroll horizontally to pan back in time, pinned to the most recent weeks by default
+- Server start now rebuilds the frontend bundle whenever `dist` is older than the sources (`--no-build` to skip), so every launch path serves the latest UI instead of a stale build
 
 ### Fixed
 
