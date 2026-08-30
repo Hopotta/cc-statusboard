@@ -146,6 +146,14 @@ def project_label_from_cwd(cwd: Optional[str]) -> str:
     return last or "unknown"
 
 
+def is_subagent_file(path: Path) -> bool:
+    """
+    Task-tool subagent logs live under <project>/<session>/subagents/ and
+    carry a worktree cwd — they are sidechains, not user sessions.
+    """
+    return "subagents" in path.parts
+
+
 def project_breakdown(files: List[Path]) -> List[Dict[str, Any]]:
     """
     Per-project rollup derived from JSONL files.
@@ -156,8 +164,11 @@ def project_breakdown(files: List[Path]) -> List[Dict[str, Any]]:
     """
     by_cwd: Dict[str, List[Path]] = {}
     cwd_order: Dict[str, str] = {}  # cwd -> canonical (first seen) cwd value
+    main_files = [p for p in files if not is_subagent_file(p)]
+    subagent_files = [p for p in files if is_subagent_file(p)]
 
-    for p in files:
+    folder_key: Dict[Path, str] = {}  # project slug dir -> cwd key
+    for p in main_files:
         # Inspect just enough lines to discover a cwd.
         entries = _safe_load(p)
         cwd = None
@@ -172,6 +183,14 @@ def project_breakdown(files: List[Path]) -> List[Dict[str, Any]]:
         cwd = cwd.replace("\\", "/").rstrip("/").lower() or "<unknown>"
         by_cwd.setdefault(cwd, []).append(p)
         cwd_order.setdefault(cwd, cwd)
+        folder_key.setdefault(p.parent, cwd)
+
+    # Subagent logs (<slug>/<session>/subagents/) belong to the project of
+    # the session folder they live under, not to their worktree cwd.
+    for p in subagent_files:
+        key = folder_key.get(p.parent.parent.parent)
+        if key:
+            by_cwd.setdefault(key, []).append(p)
 
     rollup: List[Dict[str, Any]] = []
     for key, key_files in by_cwd.items():
@@ -214,7 +233,7 @@ def project_breakdown(files: List[Path]) -> List[Dict[str, Any]]:
                 bucket["outputTokens"] += out
                 bucket["cacheCreationTokens"] += cc
                 bucket["cacheReadTokens"] += cr
-            ts = task_timestamps(entries)
+            ts = [] if is_subagent_file(fp) else task_timestamps(entries)
             tasks_total += len(ts)
             active_total += compute_active_time(ts)
         rollup.append({
@@ -233,6 +252,7 @@ def project_breakdown(files: List[Path]) -> List[Dict[str, Any]]:
 def parse_all(root: Optional[Path] = None) -> Dict[str, Any]:
     """Top-level: scan all JSONL and return aggregated task/time/project stats."""
     files = list(iter_jsonl_files(root))
+    main_files = [f for f in files if not is_subagent_file(f)]
     total_tasks = 0
     total_active_seconds = 0
     daily_tasks: Dict[str, int] = {}
@@ -240,7 +260,7 @@ def parse_all(root: Optional[Path] = None) -> Dict[str, Any]:
 
     from datetime import datetime
 
-    for fp in files:
+    for fp in main_files:
         entries = _safe_load(fp)
         ts = task_timestamps(entries)
         total_tasks += len(ts)
