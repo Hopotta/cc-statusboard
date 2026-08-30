@@ -13,9 +13,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Optional, Tuple
 
 # Allow `python collector/generate_statusboard.py` from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -25,20 +28,88 @@ from collector.advanced import build as build_advanced  # noqa: E402
 from collector.watcher import watch_loop  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "statusboard.json"
+CCUSAGE_CACHE_PATH = Path(__file__).resolve().parent.parent / ".ccusage_cache.json"
 
 
-def build_statusboard() -> dict:
-    """Run all collectors and return the merged dict (no I/O)."""
-    print("[1/4] ccusage: session ...", file=sys.stderr)
-    sess = ccusage_parser.parse_session()
-    print("[1/4] ccusage: daily ...", file=sys.stderr)
-    daily_raw = ccusage_parser.parse_daily()
+def ccusage_fingerprint(files) -> str:
+    """Hash of the JSONL input set (path + size) — keys the ccusage cache.
 
-    print("[2/4] jsonl: scanning projects ...", file=sys.stderr)
-    scans = jsonl_parser.scan_all()
-    jsonl = jsonl_parser.summarize(scans)
+    ccusage recomputes purely from these files, so an unchanged fingerprint
+    means unchanged output (and also pins the pricing it used).
+    """
+    h = hashlib.sha1()
+    for p in sorted(files, key=str):
+        try:
+            h.update(f"{p}\0{p.stat().st_size}\0".encode("utf-8", "surrogatepass"))
+        except OSError:
+            continue
+    return h.hexdigest()
+
+
+def _read_ccusage_cache(cache_path: Path,
+                        fingerprint: Optional[str] = None
+                        ) -> Optional[Tuple[dict, dict]]:
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if fingerprint is not None and data.get("fingerprint") != fingerprint:
+        return None
+    sess, daily = data.get("session"), data.get("daily")
+    if not isinstance(sess, dict) or not isinstance(daily, dict):
+        return None
+    return sess, daily
+
+
+def _write_ccusage_cache(cache_path: Path, fingerprint: str,
+                         sess: dict, daily_raw: dict) -> None:
+    import os
+    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    tmp.write_text(
+        json.dumps({"fingerprint": fingerprint, "session": sess,
+                    "daily": daily_raw}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    os.replace(tmp, cache_path)
+
+
+def _run_ccusage_parallel() -> Tuple[dict, dict]:
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fut_sess = ex.submit(ccusage_parser.parse_session)
+        fut_daily = ex.submit(ccusage_parser.parse_daily)
+        return fut_sess.result(), fut_daily.result()
+
+
+def build_statusboard(jsonl_root: Optional[Path] = None,
+                      cache_path: Optional[Path] = None) -> dict:
+    """Run all collectors and return the merged dict (no I/O besides caches)."""
+    print("[1/4] jsonl: scanning projects ...", file=sys.stderr)
+    scans = jsonl_parser.scan_all(jsonl_root)
+    fingerprint = ccusage_fingerprint(jsonl_parser.iter_jsonl_files(jsonl_root))
+
+    print("[2/4] ccusage: session + daily ...", file=sys.stderr)
+    cache_path = cache_path or CCUSAGE_CACHE_PATH
+    cached = _read_ccusage_cache(cache_path, fingerprint)
+    if cached is not None:
+        sess, daily_raw = cached
+        print("       inputs unchanged — using cached ccusage output", file=sys.stderr)
+    else:
+        try:
+            sess, daily_raw = _run_ccusage_parallel()
+            _write_ccusage_cache(cache_path, fingerprint, sess, daily_raw)
+        except Exception as exc:  # noqa: BLE001
+            stale = _read_ccusage_cache(cache_path)
+            if stale is None:
+                raise
+            print(
+                f"[ccusage] WARNING: refresh failed ({exc});\n"
+                f"[ccusage] using the stale ccusage cache",
+                file=sys.stderr,
+            )
+            sess, daily_raw = stale
 
     print("[3/4] advanced analytics ...", file=sys.stderr)
+    jsonl = jsonl_parser.summarize(scans)
     advanced = build_advanced(scans, ccusage_daily_raw=daily_raw, jsonl_summary=jsonl)
 
     print("[4/4] aggregating ...", file=sys.stderr)
@@ -48,15 +119,20 @@ def build_statusboard() -> dict:
     return aggregator.aggregate(totals, models, daily, jsonl, advanced=advanced)
 
 
-def write_statusboard(out_path: Path, payload: dict) -> None:
+def write_statusboard(out_path: Path, payload: dict, pretty: bool = False) -> None:
     """Atomically write statusboard.json.
 
     Writes go through a `*.tmp` sibling and are renamed with os.replace so
-    concurrent readers (the dashboard polling every 5 s) never see a partial file.
+    concurrent readers (the dashboard polling every 5 s) never see a partial
+    file.  The artifact is a machine product — compact by default, `--pretty`
+    for human inspection.
     """
     import os
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    if pretty:
+        text = json.dumps(payload, indent=2, ensure_ascii=False)
+    else:
+        text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
 
     # Atomic write: tmp file in the same directory, then os.replace.
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
@@ -87,10 +163,15 @@ def main() -> int:
         action="store_true",
         help="Run once and exit (default if --watch not given)",
     )
+    p.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Write statusboard.json indented (for human inspection)",
+    )
     args = p.parse_args()
 
     payload = build_statusboard()
-    write_statusboard(args.out, payload)
+    write_statusboard(args.out, payload, pretty=args.pretty)
 
     if not args.watch:
         return 0
@@ -101,7 +182,7 @@ def main() -> int:
 
     def rebuild() -> None:
         payload = build_statusboard()
-        write_statusboard(args.out, payload)
+        write_statusboard(args.out, payload, pretty=args.pretty)
 
     try:
         watch_loop(rebuild, interval=3.0, cooldown=10.0)

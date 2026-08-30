@@ -103,12 +103,37 @@ def extract_text(content: Any) -> str:
     return ""
 
 
+def _user_text(entry: Dict[str, Any]) -> str:
+    """Plain prompt text of a user entry (string content or text blocks)."""
+    msg = entry.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
+# User-shaped entries that are actually system-injected, not user prompts.
+_INJECTED_PREFIXES = (
+    "<command-",
+    "<local-command-",
+    "[Request interrupted",
+    "<task-notification",
+)
+
+
 def is_real_user_task(entry: Dict[str, Any]) -> bool:
     """
     Spec: a task is a real user prompt.  Filters out tool responses
     (`toolUseResult` present) and system-injected user-shaped entries:
     `isMeta` caveats, slash-command expansions (`<command-…>` /
-    `<local-command-…>`) and interrupt placeholders.
+    `<local-command-…>`), interrupt placeholders and background
+    task notifications.  The check runs on the plain text of string OR
+    list-shaped content blocks.
     """
     if entry.get("type") != "user":
         return False
@@ -116,12 +141,8 @@ def is_real_user_task(entry: Dict[str, Any]) -> bool:
         return False
     if entry.get("isMeta"):
         return False
-    msg = entry.get("message")
-    content = msg.get("content") if isinstance(msg, dict) else None
-    if isinstance(content, str):
-        stripped = content.lstrip()
-        if stripped.startswith(("<command-", "<local-command-", "[Request interrupted")):
-            return False
+    if _user_text(entry).lstrip().startswith(_INJECTED_PREFIXES):
+        return False
     return True
 
 
@@ -193,12 +214,11 @@ def _scan_file(path: Path, mtime: float, want_timeline: bool) -> FileScan:
 
         etype = e.get("type")
         if etype == "user":
-            # Timeline keeps the raw flow (minus tool-result echoes); task
-            # metrics use the stricter is_real_user_task filter.
+            # Timeline keeps the raw flow (minus tool-result echoes) but not
+            # the prompt text itself — the artifact stays content-free
+            # (payload + privacy); it is a rhythm view, not a content view.
             if events is not None and ts and "toolUseResult" not in e:
-                text = extract_text((e.get("message") or {}).get("content"))
-                label = text[:80].replace("\n", " ").strip() or "(empty)"
-                events.append({"t": ts, "kind": "user", "label": label})
+                events.append({"t": ts, "kind": "user", "label": "user"})
             if not is_real_user_task(e):
                 continue
             dt = _parse_ts(ts)
