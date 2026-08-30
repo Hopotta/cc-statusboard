@@ -139,6 +139,21 @@ def parse_monthly() -> Dict[str, Any]:
     return _run_ccusage(["monthly"])
 
 
+def _to_int(value: Any) -> int:
+    """Tolerant int conversion: ccusage may emit nulls or numeric strings."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _to_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def normalize_totals(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
     Reduce ccusage's `totals` block to the shape we use everywhere:
@@ -154,12 +169,12 @@ def normalize_totals(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
     t = raw.get("totals") or {}
     return {
-        "totalTokens": int(t.get("totalTokens", 0)),
-        "inputTokens": int(t.get("inputTokens", 0)),
-        "outputTokens": int(t.get("outputTokens", 0)),
-        "cacheCreationTokens": int(t.get("cacheCreationTokens", 0)),
-        "cacheReadTokens": int(t.get("cacheReadTokens", 0)),
-        "totalCost": float(t.get("totalCost", 0.0)),
+        "totalTokens": _to_int(t.get("totalTokens")),
+        "inputTokens": _to_int(t.get("inputTokens")),
+        "outputTokens": _to_int(t.get("outputTokens")),
+        "cacheCreationTokens": _to_int(t.get("cacheCreationTokens")),
+        "cacheReadTokens": _to_int(t.get("cacheReadTokens")),
+        "totalCost": _to_float(t.get("totalCost")),
     }
 
 

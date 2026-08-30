@@ -14,17 +14,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import time
 from pathlib import Path
-from typing import Dict
 
 # Allow `python collector/generate_statusboard.py` from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from collector import aggregator, ccusage_parser, jsonl_parser  # noqa: E402
-from collector.advanced import parse_all as parse_advanced  # noqa: E402
+from collector.advanced import build as build_advanced  # noqa: E402
+from collector.watcher import watch_loop  # noqa: E402
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "statusboard.json"
 
@@ -34,16 +32,20 @@ def build_statusboard() -> dict:
     print("[1/4] ccusage: session ...", file=sys.stderr)
     sess = ccusage_parser.parse_session()
     print("[1/4] ccusage: daily ...", file=sys.stderr)
-    daily = ccusage_parser.parse_daily()
+    daily_raw = ccusage_parser.parse_daily()
 
     print("[2/4] jsonl: scanning projects ...", file=sys.stderr)
-    jsonl = jsonl_parser.parse_all()
+    scans = jsonl_parser.scan_all()
+    jsonl = jsonl_parser.summarize(scans)
 
     print("[3/4] advanced analytics ...", file=sys.stderr)
-    advanced = parse_advanced(ccusage_daily_raw=daily, jsonl_summary=jsonl)
+    advanced = build_advanced(scans, ccusage_daily_raw=daily_raw, jsonl_summary=jsonl)
 
     print("[4/4] aggregating ...", file=sys.stderr)
-    return aggregator.aggregate(sess, daily, jsonl, advanced=advanced)
+    totals = ccusage_parser.normalize_totals(sess)
+    models = ccusage_parser.model_breakdown_from_daily(daily_raw)
+    daily = ccusage_parser.daily_series(daily_raw)
+    return aggregator.aggregate(totals, models, daily, jsonl, advanced=advanced)
 
 
 def write_statusboard(out_path: Path, payload: dict) -> None:
@@ -93,43 +95,16 @@ def main() -> int:
     if not args.watch:
         return 0
 
-    # Simple polling watcher (avoids extra deps).  Detects new sessions quickly.
+    # Shared polling watcher (see collector/watcher.py).  Rebuild failures
+    # are swallowed inside the loop so one bad ccusage run can't kill it.
     print(f"[watch] watching {jsonl_parser.CLAUDE_PROJECTS_DIR} ...", file=sys.stderr)
-    seen: set[str] = set()
-    last_size: Dict[str, int] = {}
 
-    def _seed(path_str: str) -> None:
-        try:
-            last_size[path_str] = Path(path_str).stat().st_size
-        except OSError:
-            last_size[path_str] = 0
-
-    for path_str in (str(p) for p in jsonl_parser.iter_jsonl_files()):
-        seen.add(path_str)
-        _seed(path_str)
+    def rebuild() -> None:
+        payload = build_statusboard()
+        write_statusboard(args.out, payload)
 
     try:
-        while True:
-            time.sleep(3)
-            current = set(str(p) for p in jsonl_parser.iter_jsonl_files())
-            changed = False
-            for p in current - seen:
-                changed = True
-                _seed(p)  # CRITICAL: seed so the next tick doesn't double-trigger
-                print(f"[watch] new session: {p}", file=sys.stderr)
-            for p in current & seen:
-                try:
-                    size = Path(p).stat().st_size
-                except OSError:
-                    continue
-                if last_size.get(p) != size:
-                    changed = True
-                    last_size[p] = size
-                    print(f"[watch] changed: {p}", file=sys.stderr)
-            if changed:
-                payload = build_statusboard()
-                write_statusboard(args.out, payload)
-            seen = current
+        watch_loop(rebuild, interval=3.0, cooldown=10.0)
     except KeyboardInterrupt:
         print("\n[watch] stopped.", file=sys.stderr)
     return 0

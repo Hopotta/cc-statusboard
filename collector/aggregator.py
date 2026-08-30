@@ -2,8 +2,8 @@
 aggregator.py
 =============
 
-Joins ccusage (token/cost/model) with JSONL (tasks/time/projects) into the
-unified statusboard.json shape described in the plan:
+Joins ccusage (token/cost/model) with JSONL (tasks/time/projects/sessions)
+into the unified statusboard.json shape described in the plan:
 
     {
       "summary":  { totalTokens, totalTasks, totalTime, averageTask, mostUsedModel },
@@ -11,19 +11,20 @@ unified statusboard.json shape described in the plan:
       "models":   [ {modelName, totalTokens, sharePct, ...}, ... ],
       "tasks":    { totalTasks, totalActiveSeconds, averageSeconds, maxSeconds, busiestDay },
       "projects": [ {project, tasks, activeSeconds, tokens, cost, ...}, ... ],
+      "sessions": [ {sessionId, project, tokens, cost, ...}, ... ],
       "dailyActivity": [ {date, tokens, tasks, activeSeconds, cost}, ... ],
-      "advanced": { toolUsage, workflowTimeline, promptCategories, modelEfficiency },
+      "advanced": { toolUsage, workflowTimeline, promptCategories, taskDurations, modelEfficiency },
       "generatedAt": "ISO timestamp"
     }
 
 The aggregator is the "single source of truth" - it doesn't import ccusage or
-touch JSONL directly.  Pass in the already-parsed data instead.
+touch JSONL directly.  Pass in the already-parsed/normalized data instead.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional
 
 
 def _fmt_seconds(secs: int) -> str:
@@ -59,10 +60,6 @@ def busiest_day(daily_activity: List[Dict[str, Any]]) -> Optional[Dict[str, Any]
     return busiest
 
 
-def longest_task(task_durations: List[int]) -> int:
-    return max(task_durations) if task_durations else 0
-
-
 def merge_daily(
     ccusage_daily: List[Dict[str, Any]],
     jsonl_daily_tasks: List[Dict[str, Any]],
@@ -71,53 +68,63 @@ def merge_daily(
     """
     Left-joined per-day series keyed by date.  We iterate over the union of
     dates seen by both sources so days that only have token data (e.g. agent
-    ran without user prompts) still appear.
+    ran without user prompts) still appear.  Slots created for JSONL-only
+    dates carry the full token shape so downstream consumers never see
+    missing fields.
     """
+    def empty_slot(date: str) -> Dict[str, Any]:
+        return {
+            "date": date,
+            "tokens": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheCreationTokens": 0,
+            "cacheReadTokens": 0,
+            "cost": 0.0,
+            "tasks": 0,
+            "activeSeconds": 0,
+        }
+
     by_date: Dict[str, Dict[str, Any]] = {}
     for d in ccusage_daily:
-        by_date[d["date"]] = {
-            "date": d["date"],
+        slot = empty_slot(d["date"])
+        slot.update({
             "tokens": d["totalTokens"],
             "inputTokens": d["inputTokens"],
             "outputTokens": d["outputTokens"],
             "cacheCreationTokens": d["cacheCreationTokens"],
             "cacheReadTokens": d["cacheReadTokens"],
             "cost": d["totalCost"],
-            "tasks": 0,
-            "activeSeconds": 0,
-        }
+        })
+        by_date[d["date"]] = slot
     for t in jsonl_daily_tasks:
-        slot = by_date.setdefault(t["date"], {"date": t["date"], "tokens": 0, "cost": 0.0})
+        slot = by_date.setdefault(t["date"], empty_slot(t["date"]))
         slot["tasks"] = t["tasks"]
     for a in jsonl_daily_active:
-        slot = by_date.setdefault(a["date"], {"date": a["date"], "tokens": 0, "cost": 0.0})
+        slot = by_date.setdefault(a["date"], empty_slot(a["date"]))
         slot["activeSeconds"] = a["activeSeconds"]
     out = sorted(by_date.values(), key=lambda d: d["date"])
     return out
 
 
 def aggregate(
-    ccusage_session_raw: Dict[str, Any],
-    ccusage_daily_raw: Dict[str, Any],
+    totals: Dict[str, Any],
+    models: List[Dict[str, Any]],
+    ccusage_daily: List[Dict[str, Any]],
     jsonl_summary: Dict[str, Any],
     advanced: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Build the final statusboard.json payload.
 
-    Arguments are the already-parsed outputs from ccusage_parser and jsonl_parser.
-    `advanced` is the optional Phase-4 analytics payload (tool usage, timeline, etc).
+    `totals` is the normalized ccusage totals dict, `models` the per-model
+    breakdown and `ccusage_daily` the per-day ccusage series — all prepared
+    by the caller (build_statusboard) from ccusage's raw output.
+    `jsonl_summary` is jsonl_parser.summarize()'s output.
+    `advanced` is the optional Phase-4 analytics payload.
     """
-    from .ccusage_parser import (
-        daily_series,
-        model_breakdown_from_daily,
-        normalize_totals,
-    )
-
-    totals = normalize_totals(ccusage_session_raw)
-    models = model_breakdown_from_daily(ccusage_daily_raw)
     daily = merge_daily(
-        daily_series(ccusage_daily_raw),
+        ccusage_daily,
         jsonl_summary.get("dailyTasks", []),
         jsonl_summary.get("dailyActive", []),
     )
@@ -126,13 +133,12 @@ def aggregate(
     total_active = jsonl_summary.get("totalActiveSeconds", 0)
     avg_task = int(total_active / total_tasks) if total_tasks else 0
 
-    # Per-project tokens are measured directly from the JSONL usage records
-    # (see jsonl_parser.project_breakdown).  Cost is priced per model using
-    # unit prices derived from ccusage's daily modelBreakdowns, with the
-    # global average as fallback for models ccusage has no price data for.
-    ccusage_session_totals = ccusage_session_raw.get("totals") or {}
-    ccusage_total_tokens = int(ccusage_session_totals.get("totalTokens", 0)) or 1
-    ccusage_total_cost = float(ccusage_session_totals.get("totalCost", 0.0))
+    # Project/session tokens are measured directly from the JSONL usage
+    # records (see jsonl_parser).  Cost is priced per model using unit prices
+    # derived from ccusage's daily modelBreakdowns, with the global average
+    # as fallback for models ccusage has no price data for.
+    ccusage_total_tokens = totals["totalTokens"] or 1
+    ccusage_total_cost = totals["totalCost"]
     avg_price = ccusage_total_cost / ccusage_total_tokens
     price_by_model = {
         m["modelName"]: m["cost"] / m["totalTokens"]
@@ -140,18 +146,21 @@ def aggregate(
         if m["totalTokens"] > 0
     }
 
-    projects_out: List[Dict[str, Any]] = []
-    for proj in jsonl_summary.get("projects", []):
-        proj_tasks = max(1, proj["tasks"])
-        proj_cost = 0.0
-        for name, usage in (proj.get("modelUsage") or {}).items():
+    def price(model_usage: Dict[str, Any]) -> float:
+        cost = 0.0
+        for name, usage in (model_usage or {}).items():
             model_tokens = (
                 usage.get("inputTokens", 0)
                 + usage.get("outputTokens", 0)
                 + usage.get("cacheCreationTokens", 0)
                 + usage.get("cacheReadTokens", 0)
             )
-            proj_cost += model_tokens * price_by_model.get(name, avg_price)
+            cost += model_tokens * price_by_model.get(name, avg_price)
+        return cost
+
+    projects_out: List[Dict[str, Any]] = []
+    for proj in jsonl_summary.get("projects", []):
+        proj_tasks = max(1, proj["tasks"])
         projects_out.append({
             "project": proj["project"],
             "projectPath": proj["projectPath"],
@@ -159,9 +168,27 @@ def aggregate(
             "activeSeconds": proj["activeSeconds"],
             "activeHuman": _fmt_seconds(proj["activeSeconds"]),
             "tokens": proj.get("tokens", 0),
-            "cost": round(proj_cost, 4),
+            "cost": round(price(proj.get("modelUsage")), 4),
             "files": proj["files"],
             "averageSeconds": int(proj["activeSeconds"] / proj_tasks),
+        })
+
+    sessions_out: List[Dict[str, Any]] = []
+    for sess in jsonl_summary.get("sessions", []):
+        sess_tasks = max(1, sess["tasks"])
+        sessions_out.append({
+            "sessionId": sess["sessionId"],
+            "project": sess["project"],
+            "projectPath": sess.get("projectPath"),
+            "files": sess["files"],
+            "tasks": sess["tasks"],
+            "activeSeconds": sess["activeSeconds"],
+            "activeHuman": _fmt_seconds(sess["activeSeconds"]),
+            "tokens": sess.get("tokens", 0),
+            "cost": round(price(sess.get("modelUsage")), 4),
+            "averageSeconds": int(sess["activeSeconds"] / sess_tasks),
+            "firstTs": sess.get("firstTs"),
+            "lastTs": sess.get("lastTs"),
         })
 
     summary = {
@@ -218,6 +245,7 @@ def aggregate(
             "busiestDay": busiest_day(daily),
         },
         "projects": projects_out,
+        "sessions": sessions_out,
         "dailyActivity": daily,
         "advanced": advanced or {},
         "generatedAt": datetime.now(timezone.utc).isoformat(),

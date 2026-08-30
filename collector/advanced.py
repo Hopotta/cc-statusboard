@@ -2,14 +2,14 @@
 advanced.py
 ===========
 
-Higher-order analytics derived from JSONL session logs.
+Higher-order analytics derived from JSONL session scans (`jsonl_parser.scan_all`).
 
 Provides:
-    - tool usage stats:      how often each tool was invoked
-    - agent workflow timeline: user→assistant→tool sequence per session
+    - tool usage stats:      how often each tool was invoked, per project
+    - agent workflow timeline: user→assistant→tool sequence per recent session
     - prompt categories:      simple heuristic buckets for user prompts
-    - model efficiency:       tokens / task, cost / task, cache hit rate
-    - per-project comparison: tokens, tasks, time, tools
+    - model efficiency:       tokens / task, cost / task, cache share
+    - task duration stats:    longest / p50 / p90 (no raw array in the payload)
 
 The heuristics here are intentionally simple — they're meant to be
     suggestive, not authoritative.  See PROMPT_CATEGORIES for the keyword map.
@@ -17,19 +17,16 @@ The heuristics here are intentionally simple — they're meant to be
 
 from __future__ import annotations
 
-import json
 import re
 from collections import Counter, defaultdict
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .jsonl_parser import (
-    CLAUDE_PROJECTS_DIR,
-    _safe_load,
-    is_real_user_task,
-    iter_jsonl_files,
-    project_label_from_cwd,
+    FileScan,
+    MAX_TASK_DURATION_SECONDS,
+    project_groups,
+    scan_all,
 )
 
 # Heuristic prompt categories — best-effort, regex based.
@@ -81,66 +78,22 @@ def _classify_prompt(text: str) -> str:
     return "other"
 
 
-def _extract_text(content: Any) -> str:
-    """Assistant/user message `content` can be a string or a list of blocks."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        chunks: List[str] = []
-        for block in content:
-            if isinstance(block, dict):
-                if block.get("type") == "text":
-                    chunks.append(block.get("text", ""))
-                elif block.get("type") == "tool_use":
-                    inp = block.get("input", {})
-                    if isinstance(inp, dict):
-                        cmd = inp.get("command") or inp.get("file_path") or ""
-                        if cmd:
-                            chunks.append(f"[{block.get('name', '?')}: {cmd}]")
-                elif block.get("type") == "tool_result":
-                    chunks.append("[tool result]")
-            elif isinstance(block, str):
-                chunks.append(block)
-        return "\n".join(chunks)
-    return ""
-
-
-def parse_tool_usage(root: Optional[Path] = None) -> Dict[str, Any]:
+def build_tool_usage(scans: List[FileScan]) -> Dict[str, Any]:
     """
-    Count tool invocations across all sessions.
-
-    Walks assistant messages and pulls `tool_use` blocks.  Each block has a
-    `name` (the tool name) and `input` (the arguments).  We don't extract
-    argument details — just the names + counts.
+    Count tool invocations across all sessions.  Subagent sidechains are
+    grouped under their parent project, using the same project labels as
+    the project table.
     """
     counts: Counter[str] = Counter()
     by_project: Dict[str, Counter[str]] = defaultdict(Counter)
 
-    for fp in iter_jsonl_files(root):
-        # Per-file project resolution.
-        project_key: Optional[str] = None
-        for line in _safe_load(fp):
-            if project_key is None and line.get("cwd"):
-                project_key = project_label_from_cwd(line["cwd"])
-                break
-
-        for line in _safe_load(fp):
-            if line.get("type") != "assistant":
-                continue
-            msg = line.get("message", {})
-            if not isinstance(msg, dict):
-                continue
-            content = msg.get("content", [])
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    name = block.get("name") or "unknown"
-                    counts[name] += 1
-                    if project_key:
-                        by_project[project_key][name] += 1
-                    # No break: Claude Code routinely issues parallel tool calls
-                    # in a single assistant message; each `tool_use` block counts.
+    for _, label, group in project_groups(scans):
+        project_counter: Counter[str] = Counter()
+        for s in group:
+            counts.update(s.tool_counts)
+            project_counter.update(s.tool_counts)
+        if project_counter:
+            by_project[label] = project_counter
 
     return {
         "tools": [
@@ -156,115 +109,44 @@ def parse_tool_usage(root: Optional[Path] = None) -> Dict[str, Any]:
     }
 
 
-def parse_workflow_timeline(root: Optional[Path] = None,
-                             max_sessions: int = 10,
-                             max_events_per_session: int = 80) -> Dict[str, Any]:
+def build_workflow_timeline(scans: List[FileScan],
+                            max_events_per_session: int = 80) -> Dict[str, Any]:
     """
-    Build a coarse timeline of recent sessions.
-
-    For each recent session we return an array of events:
-        { t: ISO timestamp, kind: 'user'|'assistant'|'tool', label: str }
-
-    Capped at `max_sessions` × `max_events_per_session` to keep payload size sane.
-    The strip view (front-end) and the detail view share the same events; if you
-    expand a session in the UI it shows the same events, no second fetch.
+    Coarse timeline of the recent sessions (only scans with timeline events;
+    `scan_all` populates those for the most recent main sessions).
     """
-    sessions: List[Tuple[float, Path]] = []
-    for fp in iter_jsonl_files(root):
-        try:
-            mtime = fp.stat().st_mtime
-        except OSError:
-            continue
-        sessions.append((mtime, fp))
-    sessions.sort(reverse=True)
+    recent = [s for s in scans
+              if s.timeline_events and not s.is_subagent]
+    recent.sort(key=lambda s: s.mtime, reverse=True)
 
     out: List[Dict[str, Any]] = []
-    for _, fp in sessions[:max_sessions]:
-        events: List[Dict[str, Any]] = []
-        for line in _safe_load(fp):
-            ts = line.get("timestamp")
-            kind = line.get("type")
-            if not ts or kind not in ("user", "assistant"):
-                continue
-            # Skip tool-result echoes (type=user with a toolUseResult): they would
-            # duplicate the tool_use event we already capture on the assistant side.
-            if kind == "user" and "toolUseResult" in line:
-                continue
-            if kind == "user":
-                text = _extract_text(line.get("message", {}).get("content", ""))
-                label = text[:80].replace("\n", " ").strip() or "(empty)"
-                events.append({"t": ts, "kind": "user", "label": label})
-            elif kind == "assistant":
-                content = line.get("message", {}).get("content", [])
-                # If there's a tool_use, surface the tool name(s).
-                if isinstance(content, list):
-                    tool_names = [b.get("name") for b in content
-                                  if isinstance(b, dict) and b.get("type") == "tool_use"]
-                    if tool_names:
-                        events.append({"t": ts, "kind": "tool",
-                                       "label": ", ".join(tool_names)})
-                        continue
-                events.append({"t": ts, "kind": "assistant", "label": "reply"})
-        if events:
-            # Trim to max_events_per_session, keeping first and last.
-            if len(events) > max_events_per_session:
-                head = events[:max_events_per_session // 2]
-                tail = events[-(max_events_per_session // 2):]
-                events = head + tail
-            out.append({
-                "sessionId": fp.stem,
-                "file": str(fp),
-                "events": events,
-                "firstEvent": events[0]["t"],
-                "lastEvent": events[-1]["t"],
-            })
+    for s in recent:
+        events = list(s.timeline_events)
+        # Trim to max_events_per_session, keeping first and last.
+        if len(events) > max_events_per_session:
+            head = events[:max_events_per_session // 2]
+            tail = events[-(max_events_per_session // 2):]
+            events = head + tail
+        out.append({
+            "sessionId": s.path.stem,
+            "file": str(s.path),
+            "events": events,
+            "firstEvent": events[0]["t"],
+            "lastEvent": events[-1]["t"],
+        })
     return {"sessions": out, "count": len(out)}
 
 
-def parse_task_durations(root: Optional[Path] = None) -> List[int]:
-    """Return the duration (in seconds) of each real user task across all sessions.
-
-    Each duration is `next_task_ts - this_task_ts`, capped at 2h per the spec.
-    Used to surface the actual longest task — not the longest project-average.
-    """
-    from datetime import datetime
-    from .jsonl_parser import MAX_TASK_DURATION_SECONDS, is_real_user_task
-
-    durations: List[int] = []
-    for fp in iter_jsonl_files(root):
-        entries = _safe_load(fp)
-        ts_list: List[datetime] = []
-        for e in entries:
-            if not is_real_user_task(e):
-                continue
-            t = e.get("timestamp")
-            if not t:
-                continue
-            try:
-                ts_list.append(datetime.fromisoformat(t.replace("Z", "+00:00")))
-            except (ValueError, AttributeError):
-                continue
-        for i in range(len(ts_list) - 1):
-            d = (ts_list[i + 1] - ts_list[i]).total_seconds()
-            if d < 0:
-                d = 0
-            if d > MAX_TASK_DURATION_SECONDS:
-                d = MAX_TASK_DURATION_SECONDS
-            durations.append(int(d))
-    return durations
-
-
-def parse_prompt_categories(root: Optional[Path] = None) -> Dict[str, Any]:
-    """Bucket user prompts by heuristic category."""
+def build_prompt_categories(scans: List[FileScan]) -> Dict[str, Any]:
+    """Bucket user prompts by heuristic category (same task set as tasks)."""
     counts: Counter[str] = Counter()
     examples: Dict[str, List[str]] = defaultdict(list)
     label_map = {slug: label for slug, label, _ in PROMPT_CATEGORIES}
 
-    for fp in iter_jsonl_files(root):
-        for line in _safe_load(fp):
-            if not is_real_user_task(line):
-                continue
-            text = _extract_text(line.get("message", {}).get("content", ""))
+    for s in scans:
+        if s.is_subagent:
+            continue
+        for text in s.user_texts:
             cat = _classify_prompt(text)
             counts[cat] += 1
             # Keep at most 1 example per category to keep JSON small.
@@ -287,68 +169,112 @@ def parse_prompt_categories(root: Optional[Path] = None) -> Dict[str, Any]:
     }
 
 
+def build_task_durations(scans: List[FileScan]) -> Dict[str, Any]:
+    """
+    Duration stats for real user tasks (main sessions only): each duration is
+    `next_task_ts - this_task_ts`, capped at 2h per the spec.  Emits fixed-size
+    stats — the raw array never enters the payload.
+    """
+    durations: List[int] = []
+    for s in scans:
+        if s.is_subagent:
+            continue
+        dts = s.task_dts
+        for i in range(len(dts) - 1):
+            d = (dts[i + 1] - dts[i]).total_seconds()
+            if d < 0:
+                d = 0
+            if d > MAX_TASK_DURATION_SECONDS:
+                d = MAX_TASK_DURATION_SECONDS
+            durations.append(int(d))
+
+    durations.sort()
+    n = len(durations)
+
+    def pct(q: float) -> int:
+        # Linear interpolation between neighbouring samples (numpy-style).
+        if not n:
+            return 0
+        pos = q * (n - 1)
+        low = int(pos)
+        high = min(low + 1, n - 1)
+        frac = pos - low
+        return int(durations[low] + (durations[high] - durations[low]) * frac)
+
+    return {
+        "longest": durations[-1] if durations else 0,
+        "count": n,
+        "p50": pct(0.5),
+        "p90": pct(0.9),
+    }
+
+
 def parse_model_efficiency(
     ccusage_daily_raw: Dict[str, Any],
     jsonl_summary: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Model efficiency = tokens / task, cost / task, cache hit rate.
+    Model efficiency = tokens / task, cost / task, cache share.
 
-    The cache hit rate is `(cacheRead) / (cacheRead + input)`.  In practice the
-    real metric is `cache_read / total_prompt_tokens`, but we don't get separate
-    prompt totals so this approximation is what ccusage exposes.
+    `cacheShare` is the fraction of prompt tokens that were served from
+    cache: `cache_read / (cache_read + cache_creation + plain input)` —
+    unlike a naive read/(read+creation) ratio it cannot be inflated by a
+    call that was mostly fresh input.
     """
     tokens = ccusage_daily_raw.get("totals") or {}
-    cache_read = int(tokens.get("cacheReadTokens", 0))
-    cache_creation = int(tokens.get("cacheCreationTokens", 0))
-    inp = int(tokens.get("inputTokens", 0))
-    out = int(tokens.get("outputTokens", 0))
-    total = int(tokens.get("totalTokens", 0))
-    cost = float(tokens.get("totalCost", 0.0))
+    cache_read = int(tokens.get("cacheReadTokens", 0) or 0)
+    cache_creation = int(tokens.get("cacheCreationTokens", 0) or 0)
+    inp = int(tokens.get("inputTokens", 0) or 0)
+    out = int(tokens.get("outputTokens", 0) or 0)
+    total = int(tokens.get("totalTokens", 0) or 0)
+    cost = float(tokens.get("totalCost", 0.0) or 0.0)
     total_tasks = jsonl_summary.get("totalTasks", 0) or 1
 
-    cache_total = cache_read + cache_creation
-    cache_share = (cache_read / cache_total) if cache_total else 0.0
+    prompt_total = cache_read + cache_creation + inp
+    cache_share = (cache_read / prompt_total) if prompt_total else 0.0
     return {
         "tokensPerTask": int(total / total_tasks),
         "costPerTask": round(cost / total_tasks, 4),
         "outputRatio": round(out / max(1, total), 4),
-        "cacheHitRate": round(cache_share, 4),
+        "cacheShare": round(cache_share, 4),
         "cacheReadTokens": cache_read,
         "cacheCreationTokens": cache_creation,
+        "inputTokens": inp,
         "totalTokens": total,
         "totalCost": round(cost, 4),
     }
 
 
-def parse_all(root: Optional[Path] = None,
-              ccusage_daily_raw: Optional[Dict[str, Any]] = None,
-              jsonl_summary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Top-level aggregator for Phase 4 analytics."""
-    tools = parse_tool_usage(root)
-    timeline = parse_workflow_timeline(root)
-    prompts = parse_prompt_categories(root)
-    durations = parse_task_durations(root)
+def build(scans: List[FileScan],
+          ccusage_daily_raw: Optional[Dict[str, Any]] = None,
+          jsonl_summary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Top-level aggregator for the advanced analytics, from file scans."""
     efficiency = (
         parse_model_efficiency(ccusage_daily_raw or {}, jsonl_summary or {})
         if ccusage_daily_raw is not None and jsonl_summary is not None
         else None
     )
     return {
-        "toolUsage": tools,
-        "workflowTimeline": timeline,
-        "promptCategories": prompts,
-        "taskDurations": {
-            "durations": durations,
-            "longest": max(durations) if durations else 0,
-            "count": len(durations),
-        },
+        "toolUsage": build_tool_usage(scans),
+        "workflowTimeline": build_workflow_timeline(scans),
+        "promptCategories": build_prompt_categories(scans),
+        "taskDurations": build_task_durations(scans),
         "modelEfficiency": efficiency,
     }
 
 
+def parse_all(root: Optional[Path] = None,
+              ccusage_daily_raw: Optional[Dict[str, Any]] = None,
+              jsonl_summary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Compat entrypoint: scan `root`, then build."""
+    return build(
+        scan_all(root),
+        ccusage_daily_raw=ccusage_daily_raw,
+        jsonl_summary=jsonl_summary,
+    )
+
+
 if __name__ == "__main__":
-    import sys
     res = parse_all()
     print("Tools:", res["toolUsage"]["tools"][:8])
     print("Tool total:", res["toolUsage"]["total"])

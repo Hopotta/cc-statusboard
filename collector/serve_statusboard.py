@@ -161,6 +161,27 @@ def _ensure_dist(dist: Path) -> Path:
     return dist
 
 
+def _ensure_fresh_json(out: Path) -> None:
+    """Regenerate statusboard.json, falling back to the last known-good file.
+
+    A ccusage failure (binary missing, offline, upstream hiccup) must not take
+    the whole dashboard down — if a previous statusboard.json exists, keep
+    serving it.  Only a first-ever run with no artifact at all re-raises.
+    """
+    try:
+        payload = generate_statusboard.build_statusboard()
+        generate_statusboard.write_statusboard(out, payload)
+    except Exception as exc:  # noqa: BLE001
+        if out.exists():
+            print(
+                f"[serve] WARNING: data build failed ({exc});\n"
+                f"[serve] serving the last known-good {out.name}",
+                file=sys.stderr,
+            )
+            return
+        raise
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Serve the cc-statusboard frontend")
     p.add_argument("--port", type=int, default=3456)
@@ -175,60 +196,21 @@ def main() -> int:
     args = p.parse_args()
 
     # 1. Make sure statusboard.json is fresh before serving.
-    payload = generate_statusboard.build_statusboard()
     out = PROJECT_ROOT / "statusboard.json"
-    generate_statusboard.write_statusboard(out, payload)
+    _ensure_fresh_json(out)
 
     # 2. Ensure the frontend is up to date with its sources.
     dist = args.source if args.no_build else _ensure_dist(args.source)
 
     # 3. Optionally start a watcher that regenerates on JSONL change.
     if args.watch:
-        import traceback
-        from collector import jsonl_parser
-
-        stop = threading.Event()
+        from collector.watcher import start_watcher
 
         def watcher() -> None:
-            seen: set[str] = set()
-            last_size: Dict[str, int] = {}
+            payload = generate_statusboard.build_statusboard()
+            generate_statusboard.write_statusboard(out, payload)
 
-            def _seed(path_str: str) -> None:
-                try:
-                    last_size[path_str] = Path(path_str).stat().st_size
-                except OSError:
-                    last_size[path_str] = 0
-
-            for path_str in (str(p) for p in jsonl_parser.iter_jsonl_files()):
-                seen.add(path_str)
-                _seed(path_str)
-
-            while not stop.wait(3):
-                try:
-                    current = set(str(p) for p in jsonl_parser.iter_jsonl_files())
-                    changed = False
-                    for path in current - seen:
-                        _seed(path)  # seed so next tick doesn't double-trigger
-                        print(f"[watch] new session: {path}", file=sys.stderr)
-                        changed = True
-                    for path in current & seen:
-                        try:
-                            size = Path(path).stat().st_size
-                        except OSError:
-                            continue
-                        if last_size.get(path) != size:
-                            last_size[path] = size
-                            changed = True
-                            print(f"[watch] changed: {path}", file=sys.stderr)
-                    if changed:
-                        payload = generate_statusboard.build_statusboard()
-                        generate_statusboard.write_statusboard(out, payload)
-                    seen = current
-                except Exception:  # noqa: BLE001
-                    traceback.print_exc()
-
-        t = threading.Thread(target=watcher, name="jsonl-watcher", daemon=True)
-        t.start()
+        start_watcher(watcher, interval=3.0, cooldown=10.0)
 
     # 4. Bind a free port and serve the dist dir.
     port = _pick_free_port(args.port)
