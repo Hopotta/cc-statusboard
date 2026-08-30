@@ -1,17 +1,17 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DailyActivity } from "../types";
 import { localISODate, formatLongDateTimeEn } from "../utils/date";
 
 /**
- * Contribution-style heatmap of daily token activity for the last 6 months.
- * One row of week columns (7 stacked day-cells each); color intensity scales
- * with that day's tokens relative to the max.
+ * Contribution-style heatmap of daily token activity.  One row of week
+ * columns (7 stacked day-cells each); color intensity scales with that
+ * day's tokens relative to the max.
  *
- * The grid fills whatever width/height the card gives it: cell size is the
- * largest square that fits both axes (with small minimum gaps), and leftover
- * space is distributed evenly between week columns (space-between), so the
- * grid stretches from the left edge to the card's right padding.  Month
- * labels use the same column pitch, so they stay aligned at any width.
+ * The viewport always shows a 6-month window and its geometry is computed
+ * from the card width, but the grid itself spans the full history: drag
+ * (or scroll horizontally) to pan back in time.  The view stays pinned to
+ * the most recent weeks by default.  Month labels use the same column
+ * pitch, so they stay aligned at any width.
  */
 
 const MONTHS = 6;
@@ -25,7 +25,10 @@ const GAP_RATIO = 0.32;
 const GAP_MAX = 14;
 
 export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
-  const cells = useMemo(() => buildGrid(days, MONTHS), [days]);
+  const { cells, windowWeeks } = useMemo(
+    () => buildScrollyGrid(days, MONTHS),
+    [days],
+  );
   const monthLabels = useMemo(() => buildMonthLabels(cells), [cells]);
   const maxTokens = Math.max(1, ...cells.map((c) => c.tokens));
 
@@ -33,6 +36,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
   const tipRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef({ x: 0, y: 0 });
   const areaRef = useRef<HTMLDivElement>(null);
+  const scopeRef = useRef<HTMLDivElement>(null);
   const [areaW, setAreaW] = useState(0);
 
   // Track the grid area so the cells can fill it at any card width.
@@ -50,14 +54,67 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
   const gridW = Math.max(0, areaW - ROW_LABEL_W);
   // ONE gap value for both axes: cells and gaps stay identical horizontally
   // and vertically at every card width (no flat rectangles, no squeezed rows).
+  // Geometry is sized so a 6-month window fills the viewport exactly; the
+  // full-history block simply extends beyond it to the left.
   const cell = Math.max(
     CELL_MIN,
-    Math.min(Math.floor(gridW / (weeks + GAP_RATIO * (weeks - 1))), CELL_CAP),
+    Math.min(
+      Math.floor(gridW / (windowWeeks + GAP_RATIO * (windowWeeks - 1))),
+      CELL_CAP,
+    ),
   );
-  const gap = Math.min((gridW - weeks * cell) / (weeks - 1), GAP_MAX);
+  const gap = Math.min((gridW - windowWeeks * cell) / (windowWeeks - 1), GAP_MAX);
   const pitch = cell + gap;
   const blockW = weeks * pitch - gap;
   const blockH = DAYS * cell + (DAYS - 1) * gap;
+
+  // Drag-to-pan: mousedown + move scrolls the history horizontally.
+  const dragRef = useRef<{ x: number; left: number } | null>(null);
+  const onDragStart = (e: React.MouseEvent) => {
+    const el = areaRef.current;
+    if (!el) return;
+    dragRef.current = { x: e.clientX, left: el.scrollLeft };
+  };
+  const endDrag = () => {
+    dragRef.current = null;
+  };
+
+  // Release outside the grid must still end the drag.
+  useEffect(() => {
+    const up = () => endDrag();
+    window.addEventListener("mouseup", up);
+    return () => window.removeEventListener("mouseup", up);
+  }, []);
+
+  // Touchpad: when the cursor is over the grid, scrolling pans the history
+  // instead of the page.  Needs a native non-passive listener to
+  // preventDefault; hands back to the page at either end of the history
+  // (or when the grid fits the viewport and there is nothing to pan).
+  useEffect(() => {
+    const scope = scopeRef.current;
+    if (!scope) return;
+    const onWheel = (e: WheelEvent) => {
+      const el = areaRef.current;
+      if (!el) return;
+      const max = el.scrollWidth - el.clientWidth;
+      if (max <= 0) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const atStart = el.scrollLeft <= 0 && delta < 0;
+      const atEnd = el.scrollLeft >= max && delta > 0;
+      if (atStart || atEnd) return;
+      e.preventDefault();
+      el.scrollLeft = Math.max(0, Math.min(max, el.scrollLeft + delta));
+    };
+    scope.addEventListener("wheel", onWheel, { passive: false });
+    return () => scope.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Keep the view pinned to the most recent weeks (also after the first
+  // width measurement, when the block reaches its real size).
+  useLayoutEffect(() => {
+    const el = areaRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [cells.length, areaW]);
 
   const placeTip = () => {
     const tip = tipRef.current;
@@ -89,10 +146,16 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
 
   const onGridMouseMove = (e: React.MouseEvent) => {
     cursorRef.current = { x: e.clientX, y: e.clientY };
+    if (dragRef.current) {
+      const el = areaRef.current;
+      if (el) el.scrollLeft = dragRef.current.left - (e.clientX - dragRef.current.x);
+    }
     if (hover) placeTip();
 
     // Cursor-following spotlight, via CSS vars so cells never re-render.
-    const el = areaRef.current;
+    // Vars live on the outer (non-scrolling) scope so the ::after overlay
+    // stays fixed to the viewport while the grid pans underneath.
+    const el = scopeRef.current;
     if (el) {
       const r = el.getBoundingClientRect();
       el.style.setProperty("--mx", `${e.clientX - r.left}px`);
@@ -104,7 +167,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
     <section className="panel p-5 sm:p-6 h-full flex flex-col gap-4 min-w-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
         <h2 className="font-mono text-sm tracking-widest2 uppercase text-muted">
-          Activity · last {MONTHS} months
+          Activity
         </h2>
         <div className="flex items-center gap-3 font-mono text-[10px] text-muted shrink-0">
           <span>less</span>
@@ -118,13 +181,22 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
       </div>
 
       <div
-        ref={areaRef}
+        ref={scopeRef}
         className="heat-scope relative flex-1 flex items-center min-h-[150px]"
         onMouseMove={onGridMouseMove}
-        onMouseLeave={() => setHover(null)}
+        onMouseLeave={() => {
+          endDrag();
+          setHover(null);
+        }}
       >
+        <div
+          ref={areaRef}
+          className="flex h-full w-full items-center overflow-x-auto select-none cursor-grab active:cursor-grabbing [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          onMouseDown={onDragStart}
+          onMouseUp={endDrag}
+        >
         {/* One block holds labels + columns so they always share the pitch */}
-        <div className="relative" style={{ marginLeft: ROW_LABEL_W, width: blockW }}>
+        <div className="relative shrink-0" style={{ marginLeft: ROW_LABEL_W, width: blockW }}>
           {/* Month labels along the top, aligned to the same column pitch */}
           <div className="relative" style={{ height: 14, marginBottom: 6 }}>
             {monthLabels.map((m, i) => (
@@ -167,6 +239,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
               </div>
             ))}
           </div>
+        </div>
         </div>
       </div>
 
@@ -222,19 +295,50 @@ interface Cell {
   tasks: number;
 }
 
-function buildGrid(days: DailyActivity[], months: number): Cell[] {
-  // Dense grid: one cell per day from the Sunday on/before the first day of
-  // (months - 1) months ago, through today.  Keyed by the user's LOCAL date
-  // string so the lookup matches what the Python parser wrote.  Padded with
-  // empty cells to a whole number of weeks so every column has exactly 7
-  // cells and the days line up horizontally.
+function buildScrollyGrid(
+  days: DailyActivity[],
+  windowMonths: number,
+): { cells: Cell[]; windowWeeks: number } {
+  // The viewport geometry is sized for a `windowMonths`-month window (same
+  // as the old fixed grid), while `cells` spans the full history so the
+  // user can pan back in time.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const start = new Date(today.getFullYear(), today.getMonth() - (months - 1), 1);
-  while (start.getDay() !== 0) {
-    start.setDate(start.getDate() - 1);
+  const winStart = new Date(
+    today.getFullYear(),
+    today.getMonth() - (windowMonths - 1),
+    1,
+  );
+  while (winStart.getDay() !== 0) {
+    winStart.setDate(winStart.getDate() - 1);
   }
+  const windowWeeks = cellsBetween(days, winStart, today).length / DAYS;
 
+  let start = winStart;
+  if (days.length) {
+    const earliest = days.reduce((a, d) => (d.date < a ? d.date : a), days[0].date);
+    const e = new Date(
+      Number(earliest.slice(0, 4)),
+      Number(earliest.slice(5, 7)) - 1,
+      1,
+    );
+    // Lead in with six empty months before the earliest data so the
+    // history can always be panned through.
+    e.setMonth(e.getMonth() - 6);
+    while (e.getDay() !== 0) {
+      e.setDate(e.getDate() - 1);
+    }
+    if (e < start) start = e;
+  }
+  return { cells: cellsBetween(days, start, today), windowWeeks };
+}
+
+function cellsBetween(days: DailyActivity[], start: Date, today: Date): Cell[] {
+  // Dense grid: one cell per day from `start` (a Sunday) through today.
+  // Keyed by the user's LOCAL date string so the lookup matches what the
+  // Python parser wrote.  Padded with empty cells to a whole number of
+  // weeks so every column has exactly 7 cells and the days line up
+  // horizontally.
   const lookup = new Map(days.map((d) => [d.date, d]));
   const cells: Cell[] = [];
   const cursor = new Date(start);

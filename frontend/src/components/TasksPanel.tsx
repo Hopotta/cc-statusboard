@@ -76,7 +76,7 @@ export function TasksPanel({ tasks }: { tasks: TaskStats }) {
       </div>
 
       <div className="mt-2 flex flex-col gap-2">
-        <span className="eyebrow">Task distribution · hour of day</span>
+        <span className="eyebrow">Task distribution</span>
         <div
           className="flex items-end gap-[2px] h-16"
           onMouseMove={onBarsMouseMove}
