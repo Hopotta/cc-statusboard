@@ -23,6 +23,7 @@ All notable changes to cc-statusboard will be documented in this file.
 
 - Active-use staleness: ccusage-side panels (tokens/cost/models/daily) no longer freeze while Claude Code is running, and the silent partial-staleness mode (fallback to a stale ccusage cache behind a fresh `generatedAt`) is structurally gone — the only numbers that can age are pricing, which is labeled with its as-of date.
 - A failed ccusage run with no cache at all no longer aborts the build; costs price to 0 and `meta.pricingSource` flags it.
+- Zero-usage synthetic assistant entries (model `<synthetic>`: error bubbles, interrupt notices) no longer appear as 0-token rows in the model breakdown.
 
 ## [0.3.1] - 2026-08-31
 

@@ -286,6 +286,12 @@ def _scan_file(path: Path, mtime: float, want_timeline: bool) -> FileScan:
             out = int(u.get("output_tokens", 0) or 0)
             cc = int(u.get("cache_creation_input_tokens", 0) or 0)
             cr = int(u.get("cache_read_input_tokens", 0) or 0)
+            # Synthetic assistant entries (model "<synthetic>": error
+            # bubbles, interrupt notices) carry an all-zero usage block —
+            # not an API response, so not a model.  Skip before the bucket
+            # is created or they show up as 0-token model rows.
+            if not (inp or out or cc or cr):
+                continue
             scan.tokens += inp + out + cc + cr
             bucket = scan.model_usage.setdefault(msg.get("model") or "unknown", {
                 "inputTokens": 0,
