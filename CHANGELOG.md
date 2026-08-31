@@ -2,6 +2,17 @@
 
 All notable changes to cc-statusboard will be documented in this file.
 
+## [0.3.1] - 2026-08-31
+
+### Changed
+
+- Activity heatmap: the plain CSS `:hover` cell scale is replaced by a subtle ripple across the hovered cell's 3×3 neighbourhood, written synchronously from a delegated `mouseover` listener so it tracks the cursor with no frame of lag on fast swipes; the highlight ring is gone and the grid JSX is memoized so tooltip re-renders never touch the ~340 cells
+- Tasks: the hour-of-day distribution's hover target is now the full-height column (zero-count hours included, so every hour shows its tooltip) while the brighten/glow effect stays on the bar itself
+
+### Fixed
+
+- Token throughput: toggling total/stacked no longer shifts the x-axis and plot area (the legend is always mounted and merely hidden in total view)
+
 ## [0.3.0] - 2026-08-30
 
 ### Added
