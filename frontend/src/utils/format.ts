@@ -47,11 +47,16 @@ export function formatPct(p: number, fractionDigits = 1): string {
   return `${p.toFixed(fractionDigits)}%`;
 }
 
+/**
+ * All dollar figures on the board are estimates: tokens priced with blended
+ * per-model rates derived from ccusage's LiteLLM pricing (±10% or worse for
+ * router models).  The "~" marks that everywhere a cost is shown.
+ */
 export function formatUSD(n: number): string {
-  if (!isFinite(n)) return "$0.00";
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  if (n >= 1) return `$${n.toFixed(2)}`;
-  return `$${n.toFixed(3)}`;
+  if (!isFinite(n)) return "~$0.00";
+  if (n >= 100) return `~$${n.toFixed(0)}`;
+  if (n >= 1) return `~$${n.toFixed(2)}`;
+  return `~$${n.toFixed(3)}`;
 }
 
 export function relativeTime(d: Date | null): string {

@@ -222,7 +222,7 @@ export function TokenTrend({ days }: { days: DailyActivity[] }) {
                 paddingTop: 10,
                 visibility: mode === "total" ? "hidden" : "visible",
               }}
-              iconType="plainrect"
+              iconType="rect"
               iconSize={8}
             />
             {mode === "stacked" ? (

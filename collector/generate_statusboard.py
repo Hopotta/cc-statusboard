@@ -8,115 +8,136 @@ Usage:
     python collector/generate_statusboard.py                 # writes ./statusboard.json
     python collector/generate_statusboard.py --out path.json # writes to custom path
     python collector/generate_statusboard.py --watch         # regenerate on JSONL change
+    python collector/generate_statusboard.py --reconcile     # refresh ccusage cache first
+
+Data flow (A3, 2026-08-31):
+    JSONL scans -> native totals/models/daily (native_usage.py) -> aggregate
+    ccusage cache -> pricing (per-model unit prices) + cross-check totals
+
+The rebuild critical path NEVER runs the ccusage CLI — it is an
+O(all-data) external process (28–32 s per call at ~283 MB) that froze the
+dashboard during active use.  ccusage is reconciled in the background
+instead (see reconcile.py); its cached output of any age still supplies
+pricing, and a missing cache simply prices everything at 0 with
+`meta.pricingSource = "none"`.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
-from concurrent.futures import ThreadPoolExecutor
+import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # Allow `python collector/generate_statusboard.py` from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from collector import aggregator, ccusage_parser, jsonl_parser  # noqa: E402
+from collector import aggregator, jsonl_parser, native_usage, reconcile  # noqa: E402
 from collector.advanced import build as build_advanced  # noqa: E402
 from collector.watcher import watch_loop  # noqa: E402
+
+if TYPE_CHECKING:
+    from collector.contracts import FilterStats, ModelUsageRow, PricingInfo
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "statusboard.json"
 CCUSAGE_CACHE_PATH = Path(__file__).resolve().parent.parent / ".ccusage_cache.json"
 
-
-def ccusage_fingerprint(files) -> str:
-    """Hash of the JSONL input set (path + size) — keys the ccusage cache.
-
-    ccusage recomputes purely from these files, so an unchanged fingerprint
-    means unchanged output (and also pins the pricing it used).
-    """
-    h = hashlib.sha1()
-    for p in sorted(files, key=str):
-        try:
-            h.update(f"{p}\0{p.stat().st_size}\0".encode("utf-8", "surrogatepass"))
-        except OSError:
-            continue
-    return h.hexdigest()
+# Sentinel (status report §5.4): the task definition filters system-injected
+# user-shaped entries by prefix/regex heuristics against an unversioned,
+# schema-less upstream format.  If the injected share among non-tool-result
+# user entries jumps past this threshold, the format has probably shifted and
+# the filter is silently over- or under-matching.  Warn loudly at build time;
+# the distribution itself ships in the artifact as `tasks.filterStats`.
+SENTINEL_INJECTED_SHARE = 0.55
 
 
-def _read_ccusage_cache(cache_path: Path,
-                        fingerprint: Optional[str] = None
-                        ) -> Optional[Tuple[dict, dict]]:
-    try:
-        data = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if fingerprint is not None and data.get("fingerprint") != fingerprint:
-        return None
-    sess, daily = data.get("session"), data.get("daily")
-    if not isinstance(sess, dict) or not isinstance(daily, dict):
-        return None
-    return sess, daily
+def _warn_injection_share(filter_stats: Optional["FilterStats"]) -> None:
+    if not filter_stats:
+        return
+    injected = filter_stats.get("isMeta", 0) + filter_stats.get("injected", 0)
+    non_tool = injected + filter_stats.get("tasks", 0)
+    if non_tool <= 0:
+        return
+    share = injected / non_tool
+    if share > SENTINEL_INJECTED_SHARE:
+        print(
+            f"[sentinel] WARNING: injected share among non-tool-result user "
+            f"entries is {share:.0%} ({injected}/{non_tool}) — above the "
+            f"{SENTINEL_INJECTED_SHARE:.0%} baseline.  The upstream JSONL "
+            f"format may have changed; inspect tasks.filterStats.",
+            file=sys.stderr,
+        )
 
 
-def _write_ccusage_cache(cache_path: Path, fingerprint: str,
-                         sess: dict, daily_raw: dict) -> None:
-    import os
-    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps({"fingerprint": fingerprint, "session": sess,
-                    "daily": daily_raw}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    os.replace(tmp, cache_path)
+def _build_meta(pricing_info: Optional["PricingInfo"],
+                native_models: List["ModelUsageRow"]) -> Dict[str, Any]:
+    """Provenance metadata (status report §5.3): what is fresh by
+    construction (everything native) vs. what leans on ccusage (pricing),
+    plus the signed native-vs-ccusage totals cross-check.
 
-
-def _run_ccusage_parallel() -> Tuple[dict, dict]:
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        fut_sess = ex.submit(ccusage_parser.parse_session)
-        fut_daily = ex.submit(ccusage_parser.parse_daily)
-        return fut_sess.result(), fut_daily.result()
+    The cross-check compares only models that exist natively: ccusage's
+    daily rollup also covers other agents' session logs (~/.codex →
+    gpt-*/codex-* models, ~5% of its volume here), which would otherwise
+    mask the real gap.  The excluded volume is reported separately."""
+    prices: Optional[Dict[str, float]] = (
+        pricing_info.get("prices") if pricing_info else None)
+    as_of = pricing_info.get("asOf") if pricing_info else None
+    model_tokens: Dict[str, int] = (
+        pricing_info.get("modelTokens") if pricing_info else None) or {}
+    native_names = {m["modelName"] for m in native_models}
+    cc_total = sum(v for k, v in model_tokens.items() if k in native_names) or None
+    cc_other = sum(v for k, v in model_tokens.items()
+                   if k not in native_names) or None
+    native_total = sum(m["totalTokens"] for m in native_models)
+    diff = None
+    if prices and cc_total:
+        diff = round((native_total - cc_total) / cc_total * 100, 2)
+    return {
+        "pricingSource": "ccusage" if prices else "none",
+        "pricingAsOf": as_of,
+        "ccusageReconciledAt": as_of,
+        "ccusageTotalTokens": cc_total,
+        "ccusageOtherAgentsTokens": cc_other,
+        "totalTokensDiffPct": diff,
+    }
 
 
 def build_statusboard(jsonl_root: Optional[Path] = None,
                       cache_path: Optional[Path] = None) -> dict:
     """Run all collectors and return the merged dict (no I/O besides caches)."""
+    t0 = time.monotonic()
     print("[1/4] jsonl: scanning projects ...", file=sys.stderr)
     scans = jsonl_parser.scan_all(jsonl_root)
-    fingerprint = ccusage_fingerprint(jsonl_parser.iter_jsonl_files(jsonl_root))
+    t1 = time.monotonic()
 
-    print("[2/4] ccusage: session + daily ...", file=sys.stderr)
+    print("[2/4] native usage rollups (pricing from ccusage cache) ...",
+          file=sys.stderr)
     cache_path = cache_path or CCUSAGE_CACHE_PATH
-    cached = _read_ccusage_cache(cache_path, fingerprint)
-    if cached is not None:
-        sess, daily_raw = cached
-        print("       inputs unchanged — using cached ccusage output", file=sys.stderr)
-    else:
-        try:
-            sess, daily_raw = _run_ccusage_parallel()
-            _write_ccusage_cache(cache_path, fingerprint, sess, daily_raw)
-        except Exception as exc:  # noqa: BLE001
-            stale = _read_ccusage_cache(cache_path)
-            if stale is None:
-                raise
-            print(
-                f"[ccusage] WARNING: refresh failed ({exc});\n"
-                f"[ccusage] using the stale ccusage cache",
-                file=sys.stderr,
-            )
-            sess, daily_raw = stale
+    pricing_info = reconcile.load_pricing(cache_path)
+    usage = native_usage.native_usage(
+        scans, pricing=pricing_info.get("prices") if pricing_info else None)
 
     print("[3/4] advanced analytics ...", file=sys.stderr)
     jsonl = jsonl_parser.summarize(scans)
-    advanced = build_advanced(scans, ccusage_daily_raw=daily_raw, jsonl_summary=jsonl)
+    _warn_injection_share(jsonl.get("filterStats"))
+    advanced = build_advanced(scans, totals=usage["totals"], jsonl_summary=jsonl)
 
     print("[4/4] aggregating ...", file=sys.stderr)
-    totals = ccusage_parser.normalize_totals(sess)
-    models = ccusage_parser.model_breakdown_from_daily(daily_raw)
-    daily = ccusage_parser.daily_series(daily_raw)
-    return aggregator.aggregate(totals, models, daily, jsonl, advanced=advanced)
+    payload = aggregator.aggregate(
+        usage["totals"], usage["models"], usage["daily"], jsonl,
+        advanced=advanced,
+    )
+    payload["meta"] = _build_meta(pricing_info, usage["models"])
+    t2 = time.monotonic()
+
+    print(
+        f"[timing] scan={t1 - t0:.2f}s aggregate={t2 - t1:.2f}s "
+        f"total={t2 - t0:.2f}s pricing={payload['meta']['pricingSource']}",
+        file=sys.stderr,
+    )
+    return payload
 
 
 def write_statusboard(out_path: Path, payload: dict, pretty: bool = False) -> None:
@@ -140,13 +161,17 @@ def write_statusboard(out_path: Path, payload: dict, pretty: bool = False) -> No
     os.replace(tmp, out_path)
 
     s = payload.get("summary", {})
+    meta = payload.get("meta", {})
     print(
         f"\n  -> wrote {out_path}\n"
-        f"     totalTokens = {s.get('totalTokens'):,}\n"
+        f"     totalTokens = {s.get('totalTokens'):,}"
+        f" (vs ccusage {meta.get('totalTokensDiffPct')}%)\n"
         f"     totalTasks  = {s.get('totalTasks')}\n"
         f"     totalTime   = {s.get('totalTimeHuman')}\n"
         f"     avgTask     = {s.get('averageTaskHuman')}\n"
         f"     topModel    = {s.get('mostUsedModel', {}).get('modelName')}\n"
+        f"     pricing     = {meta.get('pricingSource')}"
+        f" as of {meta.get('pricingAsOf') or 'never'}"
     )
 
 
@@ -168,7 +193,15 @@ def main() -> int:
         action="store_true",
         help="Write statusboard.json indented (for human inspection)",
     )
+    p.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Refresh the ccusage cache (serial, up to 5 min) before building",
+    )
     args = p.parse_args()
+
+    if args.reconcile:
+        reconcile.refresh(CCUSAGE_CACHE_PATH)
 
     payload = build_statusboard()
     write_statusboard(args.out, payload, pretty=args.pretty)
@@ -177,8 +210,11 @@ def main() -> int:
         return 0
 
     # Shared polling watcher (see collector/watcher.py).  Rebuild failures
-    # are swallowed inside the loop so one bad ccusage run can't kill it.
+    # are swallowed inside the loop so one bad cycle can't kill it.
     print(f"[watch] watching {jsonl_parser.CLAUDE_PROJECTS_DIR} ...", file=sys.stderr)
+
+    # Background ccusage reconciler (A3): pricing + cross-check only.
+    reconcile.spawn_reconciler(CCUSAGE_CACHE_PATH)
 
     def rebuild() -> None:
         payload = build_statusboard()

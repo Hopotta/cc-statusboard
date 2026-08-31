@@ -2,6 +2,28 @@
 
 All notable changes to cc-statusboard will be documented in this file.
 
+## [0.4.0] - 2026-08-31
+
+### Changed
+
+- **Architecture (A3): the rebuild critical path no longer runs `ccusage`.** Global totals, the model breakdown and the daily series are computed natively from the deduplicated JSONL `message.usage` records (`native_usage.py`), so a full rebuild costs the scan time alone (~4 s) and stays fresh during active use. Previously ccusage (28–32 s per call at ~283 MB, fatal in parallel) froze the token/model/daily panels for as long as the session stayed active.
+- `ccusage` is demoted to a background reconciler and pricing source (`reconcile.py`): it runs serially with a 300 s timeout at server start and every 6 h, refreshing `.ccusage_cache.json` (now `{fingerprint, ranAt, daily}`; legacy caches with a `session` block still readable). It can never stall or fail a rebuild.
+- Headline token/cost figures switched from the ccusage aggregation to the JSONL-native one — and the reconciliation uncovered a misreading in the old accounting: ccusage's daily rollup also covers other agents' session logs (`~/.codex`, the gpt-*/codex-* models ≈ 4.75% of its volume here). The cross-check now compares only models both sides see (`meta.ccusageTotalTokens`), reports the excluded volume as `meta.ccusageOtherAgentsTokens`, and on the same model universe the native total runs ~1% *above* ccusage's (its cross-file resume dedup) — not ~5% below.
+- Dollar figures are priced natively (tokens × blended per-model unit rates derived from ccusage's daily `modelBreakdowns`); the frontend marks every cost with a "~" and a confidence tooltip (blended pricing, ±10% on router models).
+- The P2-2 backlog trigger condition was rewritten: the per-file parse cache now targets the scan stage (watched via the new timing log), not the ccusage stage that actually hit the wall.
+
+### Added
+
+- `meta` block in `statusboard.json`: `pricingSource` / `pricingAsOf`, `ccusageReconciledAt`, `ccusageTotalTokens`, `ccusageOtherAgentsTokens`, `totalTokensDiffPct` — provenance for what is native (always fresh) vs. what leans on ccusage.
+- `tasks.filterStats` sentinel: how user-shaped entries were classified (toolResult / isMeta / injected-prefix / task), so an upstream JSONL format change shifts a visible distribution instead of silently distorting task metrics; the build prints a warning when the injected share exceeds 55%.
+- `[timing]` rebuild latency log (`scan / aggregate / total`) and ccusage duration logging in the reconciler — trigger conditions can now be data-driven.
+- `python collector/generate_statusboard.py --reconcile` for an on-demand ccusage refresh.
+
+### Fixed
+
+- Active-use staleness: ccusage-side panels (tokens/cost/models/daily) no longer freeze while Claude Code is running, and the silent partial-staleness mode (fallback to a stale ccusage cache behind a fresh `generatedAt`) is structurally gone — the only numbers that can age are pricing, which is labeled with its as-of date.
+- A failed ccusage run with no cache at all no longer aborts the build; costs price to 0 and `meta.pricingSource` flags it.
+
 ## [0.3.1] - 2026-08-31
 
 ### Changed

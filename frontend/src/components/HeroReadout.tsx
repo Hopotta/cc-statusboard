@@ -1,4 +1,4 @@
-import { formatTokens, formatTokensLong } from "../utils/format";
+import { formatTokens, formatTokensLong, formatUSD } from "../utils/format";
 import { formatLongDateTimeEn } from "../utils/date";
 
 /**
@@ -47,12 +47,16 @@ export function HeroReadout({
 
         {/* Right side ornament — callouts like a flight-data strip */}
         <div className="grid grid-cols-2 gap-x-10 gap-y-3 self-start lg:self-end">
-          <Ornament label="Spend" value={`$${cost.toFixed(2)}`} />
+          <Ornament
+            label="Spend"
+            value={formatUSD(cost)}
+            title="Estimated: blended per-model rates derived from ccusage (LiteLLM); a rough reference, not a bill."
+          />
           <Ornament
             label="Generated"
             value={formatLongDateTimeEn(new Date(generatedAt))}
           />
-          <Ornament label="Source" value="ccusage · jsonl" />
+          <Ornament label="Source" value="jsonl · ccusage pricing" />
           <Ornament label="Local" value={`${host}:${port}`} />
         </div>
       </div>
@@ -60,9 +64,17 @@ export function HeroReadout({
   );
 }
 
-function Ornament({ label, value }: { label: string; value: string }) {
+function Ornament({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" title={title}>
       <span className="eyebrow">{label}</span>
       <span className="font-mono text-sm text-fg">{value}</span>
     </div>

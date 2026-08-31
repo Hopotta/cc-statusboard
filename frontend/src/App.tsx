@@ -103,8 +103,23 @@ export default function App() {
               />
               <StatTile
                 label="Spend"
-                value={formatUSD(data.tokens.cost)}
-                sub="cumulative"
+                value={
+                  data.meta?.pricingSource === "none"
+                    ? "—"
+                    : formatUSD(data.tokens.cost)
+                }
+                sub={
+                  data.meta?.pricingSource === "none"
+                    ? "no pricing data yet"
+                    : data.meta?.pricingAsOf
+                      ? `cumulative · est. prices ${data.meta.pricingAsOf.slice(0, 10)}`
+                      : "cumulative · estimated"
+                }
+                title={
+                  "Estimated spend: tokens priced with blended per-model rates " +
+                  "derived from ccusage (LiteLLM). Treat as a rough reference " +
+                  "(±10% or worse on router models), not a bill."
+                }
               />
               <StatTile
                 label="Cache share"
@@ -223,7 +238,7 @@ function TopBar({
           <span className="font-mono text-sm tracking-widest2 uppercase">
             cc-statusboard
           </span>
-          <span className="eyebrow hidden sm:inline">v0.3</span>
+          <span className="eyebrow hidden sm:inline">v0.4</span>
         </div>
         <div className="flex items-center gap-4">
           <span className="font-mono text-[11px] text-muted">
@@ -309,7 +324,7 @@ function Footer({
       <FootCell label="Generated" value={formatDateTimeEn(new Date(generatedAt))} />
       <FootCell label="Top model" value={topModel} />
       <FootCell label="Total tokens" value={formatTokens(totalTokens, 2)} />
-      <FootCell label="Build" value="cc-statusboard v0.3" />
+      <FootCell label="Build" value="cc-statusboard v0.4" />
     </footer>
   );
 }

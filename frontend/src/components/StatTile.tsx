@@ -9,15 +9,17 @@ export function StatTile({
   value,
   sub,
   accent,
+  title,
 }: {
   label: string;
   value: string;
   sub?: string;
   accent?: Accent;
+  title?: string;
 }) {
   const accentClass = accent ? ACCENT_CLASS[accent] : "text-fg";
   return (
-    <div className="panel px-5 py-4 flex flex-col gap-1.5">
+    <div className="panel px-5 py-4 flex flex-col gap-1.5" title={title}>
       <span className="eyebrow">{label}</span>
       <span className={`readout text-3xl ${accentClass}`}>{value}</span>
       {sub && <span className="font-mono text-xs text-muted">{sub}</span>}

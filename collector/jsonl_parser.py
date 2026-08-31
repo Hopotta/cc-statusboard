@@ -32,7 +32,10 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .contracts import JsonlSummary, ProjectSummaryRow, SessionSummaryRow, TokenUsage
 
 
 CLAUDE_PROJECTS_DIR = Path(os.path.expanduser("~/.claude/projects"))
@@ -164,6 +167,12 @@ class FileScan:
     cwd: Optional[str] = None                      # first raw cwd in the file
     tokens: int = 0                                # deduped per message.id
     model_usage: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    # Deduped usage keyed by UTC date then model — feeds the native daily
+    # series (see native_usage.py) without a second pass.
+    usage_daily: Dict[str, Dict[str, Dict[str, int]]] = field(default_factory=dict)
+    # How user-shaped entries were classified (task population sentinel):
+    # counts of "userEntries", "toolResult", "isMeta", "injected", "task".
+    filter_counts: Counter = field(default_factory=Counter)
     task_isos: List[str] = field(default_factory=list)      # aligned with task_dts
     task_dts: List[datetime] = field(default_factory=list)
     tool_counts: Counter = field(default_factory=Counter)
@@ -214,6 +223,19 @@ def _scan_file(path: Path, mtime: float, want_timeline: bool) -> FileScan:
 
         etype = e.get("type")
         if etype == "user":
+            # Task-population sentinel: classify every user-shaped entry by
+            # WHY it is or isn't a task (precedence toolResult > isMeta >
+            # injected-prefix > task), so an upstream format change shows up
+            # as a shift in this distribution instead of silent drift.
+            if "toolUseResult" in e:
+                scan.filter_counts["toolResult"] += 1
+            elif e.get("isMeta"):
+                scan.filter_counts["isMeta"] += 1
+            elif _user_text(e).lstrip().startswith(_INJECTED_PREFIXES):
+                scan.filter_counts["injected"] += 1
+            else:
+                scan.filter_counts["task"] += 1
+            scan.filter_counts["userEntries"] += 1
             # Timeline keeps the raw flow (minus tool-result echoes) but not
             # the prompt text itself — the artifact stays content-free
             # (payload + privacy); it is a rhythm view, not a content view.
@@ -223,7 +245,7 @@ def _scan_file(path: Path, mtime: float, want_timeline: bool) -> FileScan:
                 continue
             dt = _parse_ts(ts)
             if dt is not None:
-                scan.task_isos.append(ts)
+                scan.task_isos.append(str(ts))
                 scan.task_dts.append(dt)
             if not scan.is_subagent:
                 text = extract_text((e.get("message") or {}).get("content"))
@@ -235,7 +257,7 @@ def _scan_file(path: Path, mtime: float, want_timeline: bool) -> FileScan:
             content = msg.get("content")
             if events is not None and ts:
                 if isinstance(content, list):
-                    tool_names = [b.get("name") for b in content
+                    tool_names = [str(b.get("name") or "?") for b in content
                                   if isinstance(b, dict) and b.get("type") == "tool_use"]
                     if tool_names:
                         events.append({"t": ts, "kind": "tool",
@@ -275,6 +297,20 @@ def _scan_file(path: Path, mtime: float, want_timeline: bool) -> FileScan:
             bucket["outputTokens"] += out
             bucket["cacheCreationTokens"] += cc
             bucket["cacheReadTokens"] += cr
+            # Per-UTC-day accumulation for the native daily series.  The
+            # date slice matches the UTC day buckets used everywhere else.
+            if ts:
+                day_bucket = scan.usage_daily.setdefault(ts[:10], {})
+                dbucket = day_bucket.setdefault(msg.get("model") or "unknown", {
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "cacheCreationTokens": 0,
+                    "cacheReadTokens": 0,
+                })
+                dbucket["inputTokens"] += inp
+                dbucket["outputTokens"] += out
+                dbucket["cacheCreationTokens"] += cc
+                dbucket["cacheReadTokens"] += cr
 
     if events is not None:
         scan.timeline_events = events
@@ -366,9 +402,9 @@ def project_groups(scans: List[FileScan]) -> List[Tuple[str, str, List[FileScan]
     for s in scans:
         if not s.is_subagent:
             continue
-        key = folder_key.get(s.path.parent.parent.parent)
-        if key:
-            by_cwd.setdefault(key, []).append(s)
+        parent_key = folder_key.get(s.path.parent.parent.parent)
+        if parent_key:
+            by_cwd.setdefault(parent_key, []).append(s)
 
     out: List[Tuple[str, str, List[FileScan]]] = []
     for key, group in by_cwd.items():
@@ -378,14 +414,14 @@ def project_groups(scans: List[FileScan]) -> List[Tuple[str, str, List[FileScan]
     return out
 
 
-def project_rollup(scans: List[FileScan]) -> List[Dict[str, Any]]:
+def project_rollup(scans: List[FileScan]) -> List["ProjectSummaryRow"]:
     """Per-project rollup derived from file scans (same shape as before)."""
-    rollup: List[Dict[str, Any]] = []
+    rollup: List["ProjectSummaryRow"] = []
     for key, label, group in project_groups(scans):
         tasks_total = 0
         active_total = 0
         tokens_total = 0
-        model_usage: Dict[str, Dict[str, int]] = {}
+        model_usage: Dict[str, "TokenUsage"] = {}
         first_cwd: Optional[str] = None
         for s in group:
             if first_cwd is None and s.cwd:
@@ -398,8 +434,10 @@ def project_rollup(scans: List[FileScan]) -> List[Dict[str, Any]]:
                     "cacheCreationTokens": 0,
                     "cacheReadTokens": 0,
                 })
-                for field_name, value in bucket.items():
-                    acc[field_name] += value
+                acc["inputTokens"] += bucket.get("inputTokens", 0)
+                acc["outputTokens"] += bucket.get("outputTokens", 0)
+                acc["cacheCreationTokens"] += bucket.get("cacheCreationTokens", 0)
+                acc["cacheReadTokens"] += bucket.get("cacheReadTokens", 0)
             if not s.is_subagent:
                 tasks_total += len(s.task_isos)
                 active_total += compute_active_time(s.task_isos)
@@ -416,7 +454,7 @@ def project_rollup(scans: List[FileScan]) -> List[Dict[str, Any]]:
     return rollup
 
 
-def session_rollup(scans: List[FileScan]) -> List[Dict[str, Any]]:
+def session_rollup(scans: List[FileScan]) -> List["SessionSummaryRow"]:
     """
     Per-session rollup (P1-3).  A session is one main JSONL file; subagent
     sidechain files fold into the session whose folder they live under.
@@ -430,12 +468,12 @@ def session_rollup(scans: List[FileScan]) -> List[Dict[str, Any]]:
             order.append(uuid)
         groups[uuid].append(s)
 
-    sessions: List[Dict[str, Any]] = []
+    sessions: List["SessionSummaryRow"] = []
     for uuid in order:
         group = groups[uuid]
         main = [s for s in group if not s.is_subagent]
         anchor = main[0] if main else group[0]
-        model_usage: Dict[str, Dict[str, int]] = {}
+        model_usage: Dict[str, "TokenUsage"] = {}
         tokens_total = 0
         for s in group:
             tokens_total += s.tokens
@@ -446,8 +484,10 @@ def session_rollup(scans: List[FileScan]) -> List[Dict[str, Any]]:
                     "cacheCreationTokens": 0,
                     "cacheReadTokens": 0,
                 })
-                for field_name, value in bucket.items():
-                    acc[field_name] += value
+                acc["inputTokens"] += bucket.get("inputTokens", 0)
+                acc["outputTokens"] += bucket.get("outputTokens", 0)
+                acc["cacheCreationTokens"] += bucket.get("cacheCreationTokens", 0)
+                acc["cacheReadTokens"] += bucket.get("cacheReadTokens", 0)
         tasks_total = sum(len(s.task_isos) for s in main)
         active_total = sum(compute_active_time(s.task_isos) for s in main)
         sessions.append({
@@ -466,7 +506,7 @@ def session_rollup(scans: List[FileScan]) -> List[Dict[str, Any]]:
     return sessions
 
 
-def summarize(scans: List[FileScan]) -> Dict[str, Any]:
+def summarize(scans: List[FileScan]) -> "JsonlSummary":
     """Aggregate file scans into the jsonl summary consumed by the aggregator."""
     main = [s for s in scans if not s.is_subagent]
     total_tasks = sum(len(s.task_isos) for s in main)
@@ -502,15 +542,24 @@ def summarize(scans: List[FileScan]) -> Dict[str, Any]:
         "dailyTasks": [{"date": d, "tasks": c} for d, c in sorted(daily_tasks.items())],
         "dailyActive": [{"date": d, "activeSeconds": s} for d, s in sorted(daily_active.items())],
         "hourlyTasks": [hourly_tasks.get(h, 0) for h in range(24)],
+        # Task-population sentinel (main files only): the share of injected
+        # entries is how an upstream JSONL format change announces itself.
+        "filterStats": {
+            "userEntries": sum(s.filter_counts.get("userEntries", 0) for s in main),
+            "toolResult": sum(s.filter_counts.get("toolResult", 0) for s in main),
+            "isMeta": sum(s.filter_counts.get("isMeta", 0) for s in main),
+            "injected": sum(s.filter_counts.get("injected", 0) for s in main),
+            "tasks": total_tasks,
+        },
     }
 
 
-def project_breakdown(files: List[Path]) -> List[Dict[str, Any]]:
+def project_breakdown(files: List[Path]) -> List["ProjectSummaryRow"]:
     """Roll up the given files into projects (kept for direct callers/tests)."""
     return project_rollup(scan_files(files))
 
 
-def parse_all(root: Optional[Path] = None) -> Dict[str, Any]:
+def parse_all(root: Optional[Path] = None) -> "JsonlSummary":
     """Top-level: scan all JSONL and return aggregated task/time/project stats."""
     return summarize(scan_all(root))
 

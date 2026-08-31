@@ -222,6 +222,11 @@ def main() -> int:
     if args.watch:
         from collector.watcher import start_watcher
 
+        # Background ccusage reconciler (A3): refreshes pricing + the
+        # cross-check cache on a clock; the rebuild path never touches it.
+        from collector import reconcile
+        reconcile.spawn_reconciler(generate_statusboard.CCUSAGE_CACHE_PATH)
+
         def watcher() -> None:
             try:
                 payload = generate_statusboard.build_statusboard()

@@ -2,8 +2,9 @@
 aggregator.py
 =============
 
-Joins ccusage (token/cost/model) with JSONL (tasks/time/projects/sessions)
-into the unified statusboard.json shape described in the plan:
+Joins the native usage rollups (tokens/cost/models, see native_usage.py)
+with the JSONL rollups (tasks/time/projects/sessions) into the unified
+statusboard.json shape described in the plan:
 
     {
       "summary":  { totalTokens, totalTasks, totalTime, averageTask, mostUsedModel },
@@ -17,14 +18,18 @@ into the unified statusboard.json shape described in the plan:
       "generatedAt": "ISO timestamp"
     }
 
-The aggregator is the "single source of truth" - it doesn't import ccusage or
-touch JSONL directly.  Pass in the already-parsed/normalized data instead.
+The aggregator is the "single source of truth" - it doesn't import ccusage,
+native_usage or jsonl_parser, and never touches the filesystem.  Pass in
+the already-parsed/normalized data instead.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from .contracts import DailyUsageSlot, JsonlSummary, ModelUsageRow, TokenUsage, UsageTotals
 
 
 def _fmt_seconds(secs: int) -> str:
@@ -40,7 +45,7 @@ def _fmt_seconds(secs: int) -> str:
     return f"{m}m"
 
 
-def most_used_model(models: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def most_used_model(models: List["ModelUsageRow"]) -> Optional[Dict[str, Any]]:
     """Pick the model with the largest totalTokens share."""
     if not models:
         return None
@@ -61,7 +66,7 @@ def busiest_day(daily_activity: List[Dict[str, Any]]) -> Optional[Dict[str, Any]
 
 
 def merge_daily(
-    ccusage_daily: List[Dict[str, Any]],
+    usage_daily: List["DailyUsageSlot"],
     jsonl_daily_tasks: List[Dict[str, Any]],
     jsonl_daily_active: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -86,7 +91,7 @@ def merge_daily(
         }
 
     by_date: Dict[str, Dict[str, Any]] = {}
-    for d in ccusage_daily:
+    for d in usage_daily:
         slot = empty_slot(d["date"])
         slot.update({
             "tokens": d["totalTokens"],
@@ -108,25 +113,25 @@ def merge_daily(
 
 
 def aggregate(
-    totals: Dict[str, Any],
-    models: List[Dict[str, Any]],
-    ccusage_daily: List[Dict[str, Any]],
-    jsonl_summary: Dict[str, Any],
+    totals: "UsageTotals",
+    models: List["ModelUsageRow"],
+    ccusage_daily: List["DailyUsageSlot"],
+    jsonl_summary: "JsonlSummary",
     advanced: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Build the final statusboard.json payload.
 
-    `totals` is the normalized ccusage totals dict, `models` the per-model
-    breakdown and `ccusage_daily` the per-day ccusage series — all prepared
-    by the caller (build_statusboard) from ccusage's raw output.
+    `totals` is the native usage totals dict, `models` the per-model
+    breakdown and `ccusage_daily` the per-day usage series — all prepared
+    by the caller (build_statusboard) from native_usage's rollups.
     `jsonl_summary` is jsonl_parser.summarize()'s output.
     `advanced` is the optional Phase-4 analytics payload.
     """
     daily = merge_daily(
         ccusage_daily,
-        jsonl_summary.get("dailyTasks", []),
-        jsonl_summary.get("dailyActive", []),
+        list(jsonl_summary.get("dailyTasks", [])),
+        list(jsonl_summary.get("dailyActive", [])),
     )
 
     total_tasks = jsonl_summary.get("totalTasks", 0)
@@ -146,7 +151,7 @@ def aggregate(
         if m["totalTokens"] > 0
     }
 
-    def price(model_usage: Dict[str, Any]) -> float:
+    def price(model_usage: Optional[Dict[str, "TokenUsage"]]) -> float:
         cost = 0.0
         for name, usage in (model_usage or {}).items():
             model_tokens = (
@@ -242,6 +247,10 @@ def aggregate(
                 default=0,
             ),
             "hourlyTasks": jsonl_summary.get("hourlyTasks", []),
+            # Task-population sentinel: how user-shaped entries were
+            # classified (see jsonl_parser.summarize).  An upstream JSONL
+            # format change shows up here before anything breaks.
+            "filterStats": jsonl_summary.get("filterStats"),
             "busiestDay": busiest_day(daily),
         },
         "projects": projects_out,

@@ -39,6 +39,25 @@ export interface TaskStats {
   longestAverageSeconds: number;
   busiestDay: { date: string; tasks: number; activeSeconds: number } | null;
   hourlyTasks: number[];
+  /** Task-population sentinel: how user-shaped entries were classified. */
+  filterStats?: {
+    userEntries: number;
+    toolResult: number;
+    isMeta: number;
+    injected: number;
+    tasks: number;
+  };
+}
+
+/** Provenance metadata (native aggregation + ccusage reconciler). */
+export interface StatusboardMeta {
+  pricingSource: "ccusage" | "none";
+  pricingAsOf: string | null;
+  ccusageReconciledAt: string | null;
+  ccusageTotalTokens: number | null;
+  ccusageOtherAgentsTokens?: number | null;
+  /** (native - ccusage matched models) / matched, signed percent */
+  totalTokensDiffPct: number | null;
 }
 
 export interface ProjectStat {
@@ -81,6 +100,7 @@ export interface Statusboard {
     modelEfficiency: ModelEfficiency | null;
   };
   generatedAt: string;
+  meta?: StatusboardMeta;
 }
 
 export interface ToolUsage {

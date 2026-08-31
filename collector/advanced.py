@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from .jsonl_parser import (
     FileScan,
@@ -28,6 +28,9 @@ from .jsonl_parser import (
     project_groups,
     scan_all,
 )
+
+if TYPE_CHECKING:
+    from .contracts import JsonlSummary, UsageTotals
 
 # Heuristic prompt categories — best-effort, regex based, first match wins.
 # Order matters: debug guards its colloquial failure words before ui/run can
@@ -165,7 +168,7 @@ def build_workflow_timeline(scans: List[FileScan],
 
     out: List[Dict[str, Any]] = []
     for s in recent:
-        events = list(s.timeline_events)
+        events = list(s.timeline_events or [])
         # Trim to max_events_per_session, keeping first and last.
         if len(events) > max_events_per_session:
             head = events[:max_events_per_session // 2]
@@ -251,24 +254,25 @@ def build_task_durations(scans: List[FileScan]) -> Dict[str, Any]:
 
 
 def parse_model_efficiency(
-    ccusage_daily_raw: Dict[str, Any],
-    jsonl_summary: Dict[str, Any],
+    totals: "UsageTotals",
+    jsonl_summary: "JsonlSummary",
 ) -> Dict[str, Any]:
     """
     Model efficiency = tokens / task, cost / task, cache share.
 
-    `cacheShare` is the fraction of prompt tokens that were served from
-    cache: `cache_read / (cache_read + cache_creation + plain input)` —
-    unlike a naive read/(read+creation) ratio it cannot be inflated by a
-    call that was mostly fresh input.
+    `totals` is the flat native totals dict (native_usage.py) — the same
+    numbers the summary panel shows.  `cacheShare` is the fraction of
+    prompt tokens that were served from cache:
+    `cache_read / (cache_read + cache_creation + plain input)` — unlike a
+    naive read/(read+creation) ratio it cannot be inflated by a call that
+    was mostly fresh input.
     """
-    tokens = ccusage_daily_raw.get("totals") or {}
-    cache_read = int(tokens.get("cacheReadTokens", 0) or 0)
-    cache_creation = int(tokens.get("cacheCreationTokens", 0) or 0)
-    inp = int(tokens.get("inputTokens", 0) or 0)
-    out = int(tokens.get("outputTokens", 0) or 0)
-    total = int(tokens.get("totalTokens", 0) or 0)
-    cost = float(tokens.get("totalCost", 0.0) or 0.0)
+    cache_read = int(totals.get("cacheReadTokens", 0) or 0)
+    cache_creation = int(totals.get("cacheCreationTokens", 0) or 0)
+    inp = int(totals.get("inputTokens", 0) or 0)
+    out = int(totals.get("outputTokens", 0) or 0)
+    total = int(totals.get("totalTokens", 0) or 0)
+    cost = float(totals.get("totalCost", 0.0) or 0.0)
     total_tasks = jsonl_summary.get("totalTasks", 0) or 1
 
     prompt_total = cache_read + cache_creation + inp
@@ -287,12 +291,16 @@ def parse_model_efficiency(
 
 
 def build(scans: List[FileScan],
-          ccusage_daily_raw: Optional[Dict[str, Any]] = None,
-          jsonl_summary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Top-level aggregator for the advanced analytics, from file scans."""
+          totals: Optional["UsageTotals"] = None,
+          jsonl_summary: Optional["JsonlSummary"] = None) -> Dict[str, Any]:
+    """Top-level aggregator for the advanced analytics, from file scans.
+
+    `totals` is the flat native usage totals dict; without it (or the
+    summary) modelEfficiency is omitted.
+    """
     efficiency = (
-        parse_model_efficiency(ccusage_daily_raw or {}, jsonl_summary or {})
-        if ccusage_daily_raw is not None and jsonl_summary is not None
+        parse_model_efficiency(totals or {}, jsonl_summary or {})
+        if totals is not None and jsonl_summary is not None
         else None
     )
     return {
@@ -305,12 +313,12 @@ def build(scans: List[FileScan],
 
 
 def parse_all(root: Optional[Path] = None,
-              ccusage_daily_raw: Optional[Dict[str, Any]] = None,
-              jsonl_summary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+              totals: Optional["UsageTotals"] = None,
+              jsonl_summary: Optional["JsonlSummary"] = None) -> Dict[str, Any]:
     """Compat entrypoint: scan `root`, then build."""
     return build(
         scan_all(root),
-        ccusage_daily_raw=ccusage_daily_raw,
+        totals=totals,
         jsonl_summary=jsonl_summary,
     )
 

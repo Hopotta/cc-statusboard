@@ -5,7 +5,8 @@ analytics, with a mission-control-style UI built on top of your real session log
 
 ![Dashboard screenshot](example.png)
 
-> Built on top of [`ccusage`](https://ccusage.com/) + Claude Code's JSONL session logs.
+> Built on Claude Code's JSONL session logs.  [`ccusage`](https://ccusage.com/) is
+> used as an offline pricing source and cross-check, never on the rebuild path.
 > Owns its own intermediate data layer (`statusboard.json`) so the data sources stay
 > swappable (Claude Code, Codex, OpenCode, custom agents).
 
@@ -13,18 +14,19 @@ analytics, with a mission-control-style UI built on top of your real session log
 
 | Section                 | Source  | What it shows                                                          |
 | ----------------------- | ------- | ---------------------------------------------------------------------- |
-| **Hero readout**        | both    | the single most important number — total tokens processed               |
-| **Metric strip**        | both    | time · tasks · top model · today · spend · cache share (6 tiles)        |
+| **Hero readout**        | JSONL   | the single most important number — total tokens processed               |
+| **Metric strip**        | JSONL   | time · tasks · top model · today · spend · cache share (6 tiles)        |
 | **Activity heatmap**    | JSONL   | token heatmap with a 6-month viewport; drag to pan back through the full history |
-| **Token throughput**    | ccusage | daily token trend with selectable range (all / 1M / 3M / 6M / 1Y / custom dates), stacked input/output/cache view and outlier markers |
-| **Models**              | ccusage | per-model bars, or rollup by provider (OpenAI, DeepSeek, …)             |
+| **Token throughput**    | JSONL   | daily token trend with selectable range (all / 1M / 3M / 6M / 1Y / custom dates), stacked input/output/cache view and outlier markers |
+| **Models**              | JSONL   | per-model bars, or rollup by provider (OpenAI, DeepSeek, …)             |
 | **Tasks**               | JSONL   | total, average, longest, busiest day, hour-of-day distribution          |
 | **Project statusboard** | JSONL   | per-project token/task/time table                                       |
 | **Sessions**            | JSONL   | per-session tokens/cost/tasks ranking (sortable)                        |
-| **Advanced analytics**  | both    | tool usage, prompt categories, model efficiency, workflow timeline      |
+| **Advanced analytics**  | JSONL   | tool usage, prompt categories, model efficiency, workflow timeline      |
 
-All numbers are derived from your own `~/.claude/projects/*.jsonl` files and the
-`ccusage` JSON output — nothing is fabricated.
+All numbers are derived from your own `~/.claude/projects/*.jsonl` files — nothing
+is fabricated.  Dollar figures are estimates: tokens priced with blended per-model
+rates derived from ccusage's LiteLLM pricing, marked with "~" in the UI.
 
 ## Quick start
 
@@ -56,10 +58,12 @@ bin/cc-statusboard.cmd          # Windows
 ```
 cc-statusboard/
 ├── collector/
-│   ├── ccusage_parser.py     # wraps `ccusage` CLI, parses JSON
+│   ├── ccusage_parser.py     # wraps `ccusage` CLI, parses JSON (offline use)
 │   ├── jsonl_parser.py       # single-pass scan of ~/.claude/projects/ (tasks, time, tokens)
+│   ├── native_usage.py       # global totals / models / daily from the scans
+│   ├── reconcile.py          # background ccusage refresh: pricing + cross-check
 │   ├── advanced.py           # analytics from the scan (tools, prompts, efficiency, timeline)
-│   ├── aggregator.py         # joins both into statusboard.json
+│   ├── aggregator.py         # joins everything into statusboard.json
 │   ├── watcher.py            # shared JSONL change watcher (both CLI entrypoints)
 │   ├── generate_statusboard.py  # CLI: build + (optional) watch statusboard.json
 │   └── serve_statusboard.py  # CLI: serve the built frontend + open browser
@@ -109,15 +113,27 @@ cc-statusboard/
                           "cacheCreationTokens", "inputTokens",
                           "totalTokens", "totalCost" }
   },
-  "generatedAt": "ISO-8601 UTC timestamp"
+  "generatedAt": "ISO-8601 UTC timestamp",
+  "meta": {
+    "pricingSource": "ccusage | none",
+    "pricingAsOf": "when the pricing table was last refreshed (or null)",
+    "ccusageReconciledAt": "when ccusage last refreshed its cache (or null)",
+    "ccusageTotalTokens": "ccusage's cross-check total over matched models (or null)",
+    "ccusageOtherAgentsTokens": "ccusage volume from models absent natively (e.g. Codex CLI)",
+    "totalTokensDiffPct": "(native - ccusage matched) / ccusage matched, signed percent"
+  }
 }
 ```
 
 ## Design choices
 
-- **Backend:** a thin Python layer.  We delegate token math to `ccusage` (already the
-  canonical stats engine) and only write our own parsers for what ccusage doesn't cover
-  (tasks, time, projects, tool usage, prompt categories).
+- **Backend:** a thin Python layer.  All token/model/daily math is computed
+  natively from the JSONL `message.usage` records during the single-pass scan —
+  a full rebuild takes seconds and stays fresh while you work.  `ccusage` runs
+  in the background (server start + every 6 h, serial, 5-minute timeout) purely
+  to refresh the pricing table and cross-check the native totals; it can never
+  stall a rebuild, and its absence only zeroes the dollar figures
+  (`meta.pricingSource = "none"`).
 - **Storage:** `statusboard.json`, not SQLite — keeps the project portable and lets
   the UI be a pure static bundle.
 - **Frontend:** React + Vite + Tailwind + Recharts.  Mission-control palette
@@ -151,9 +167,13 @@ AFK; without a cap, "active time" would conflate wall-clock with effort.
 
 Per-project cost is priced per model using unit prices derived from ccusage's
 daily `modelBreakdowns` (models without pricing data fall back to the global
-average unit price). Because ccusage additionally deduplicates sessions resumed
-across files, the sum of project tokens sits slightly (~5%) below the ccusage
-global total by design.
+average unit price). Note ccusage's scope is broader than this dashboard's:
+its daily rollup also covers other agents' session logs (`~/.codex` — the
+gpt-*/codex-* models). The artifact's cross-check (`meta.totalTokensDiffPct`)
+therefore compares only the models both sides see, excluding ccusage's
+other-agent volume into `meta.ccusageOtherAgentsTokens`; on the same model
+universe the native total runs ~1% above ccusage's (which deduplicates
+sessions resumed across files).
 
 ## Adding a new agent
 

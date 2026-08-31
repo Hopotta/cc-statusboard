@@ -129,9 +129,13 @@ def parse_session() -> Dict[str, Any]:
     return _run_ccusage(["session"])
 
 
-def parse_daily() -> Dict[str, Any]:
-    """Return ccusage daily --json output (raw)."""
-    return _run_ccusage(["daily"])
+def parse_daily(timeout: int = 60) -> Dict[str, Any]:
+    """Return ccusage daily --json output (raw).
+
+    The reconciler passes a generous timeout (~300 s): the CLI needs
+    ~30 s per call at ~283 MB of JSONL, and more as the corpus grows.
+    """
+    return _run_ccusage(["daily"], timeout=timeout)
 
 
 def parse_monthly() -> Dict[str, Any]:
