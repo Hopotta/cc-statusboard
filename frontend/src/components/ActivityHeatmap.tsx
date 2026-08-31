@@ -32,12 +32,61 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
   const monthLabels = useMemo(() => buildMonthLabels(cells), [cells]);
   const maxTokens = Math.max(1, ...cells.map((c) => c.tokens));
 
-  const [hover, setHover] = useState<Cell | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef({ x: 0, y: 0 });
   const areaRef = useRef<HTMLDivElement>(null);
   const scopeRef = useRef<HTMLDivElement>(null);
   const [areaW, setAreaW] = useState(0);
+  const hoverCell = hoverIdx !== null ? cells[hoverIdx] : null;
+
+  // Subtle ripple: the hovered cell lifts a little and its 3×3
+  // neighbourhood slightly less.  It is applied synchronously inside a
+  // delegated mouseover listener — routing it through React state lagged
+  // a frame behind the cursor, leaving the highlight stranded on the
+  // previous cell.  Cells that stay affected keep their transform (no
+  // reset-and-restart dip); the grid JSX below is memoized so the tooltip
+  // re-render costs nothing.
+  const cellRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const rippleRef = useRef<HTMLDivElement[]>([]);
+  const blockRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = blockRef.current;
+    if (!el) return;
+    const onOver = (e: MouseEvent) => {
+      const t = (e.target as Element).closest(".heat-cell");
+      const idx = t ? Number((t as HTMLElement).dataset.i) : NaN;
+      const next: HTMLDivElement[] = [];
+      if (!Number.isNaN(idx)) {
+        const hr = idx % DAYS;
+        const hw = Math.floor(idx / DAYS);
+        for (let w = Math.max(0, hw - 1); w <= hw + 1; w++) {
+          for (let r = Math.max(0, hr - 1); r <= Math.min(DAYS - 1, hr + 1); r++) {
+            const c = cellRefs.current[w * DAYS + r];
+            if (!c || c.classList.contains("opacity-0")) continue;
+            const tf = `scale(${w === hw && r === hr ? 1.3 : 1.08})`;
+            if (c.style.transform !== tf) c.style.transform = tf;
+            next.push(c);
+          }
+        }
+        setHoverIdx(idx);
+      }
+      for (const old of rippleRef.current) {
+        if (!next.includes(old)) old.style.transform = "";
+      }
+      rippleRef.current = next;
+    };
+    const onLeave = () => {
+      for (const old of rippleRef.current) old.style.transform = "";
+      rippleRef.current = [];
+    };
+    el.addEventListener("mouseover", onOver);
+    el.addEventListener("mouseleave", onLeave);
+    return () => {
+      el.removeEventListener("mouseover", onOver);
+      el.removeEventListener("mouseleave", onLeave);
+    };
+  }, []);
 
   // Track the grid area so the cells can fill it at any card width.
   useLayoutEffect(() => {
@@ -67,6 +116,63 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
   const pitch = cell + gap;
   const blockW = weeks * pitch - gap;
   const blockH = DAYS * cell + (DAYS - 1) * gap;
+
+  // Memoized so a hover (hoverIdx state change) doesn't re-diff ~340
+  // cells — the element reference stays identical and React skips the
+  // whole subtree.
+  const gridBody = useMemo(
+    () => (
+      <>
+        {/* Month labels along the top, aligned to the same column pitch */}
+        <div className="relative" style={{ height: 14, marginBottom: 6 }}>
+          {monthLabels.map((m, i) => (
+            <div
+              key={i}
+              className="absolute top-0 font-mono text-[10px] text-muted tracking-widest2 uppercase whitespace-nowrap"
+              style={{ left: m.col * pitch }}
+            >
+              {m.label}
+            </div>
+          ))}
+        </div>
+        {/* Week columns — one uniform gap on both axes */}
+        <div className="flex" style={{ gap, height: blockH }}>
+          {weeksArr(weeks).map((_, wi) => (
+            <div
+              key={wi}
+              className="flex flex-col shrink-0"
+              style={{ gap, width: cell }}
+            >
+              {cells.slice(wi * DAYS, wi * DAYS + DAYS).map((c, di) => {
+                const v = c.tokens;
+                const ratio = maxTokens ? v / maxTokens : 0;
+                const empty = c.date === "";
+                const idx = wi * DAYS + di;
+                return (
+                  <div
+                    key={di}
+                    ref={(el) => {
+                      cellRefs.current[idx] = el;
+                    }}
+                    data-i={empty ? undefined : idx}
+                    className={`heat-cell rounded-[2px] border border-ink-700 shrink-0 ${empty ? "opacity-0" : ""}`}
+                    style={{
+                      width: cell,
+                      height: cell,
+                      background: v
+                        ? rgba("signal", ratio)
+                        : "transparent",
+                    }}
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </>
+    ),
+    [cells, monthLabels, maxTokens, cell, gap, pitch, blockH, weeks],
+  );
 
   // Drag-to-pan: mousedown + move scrolls the history horizontally.
   const dragRef = useRef<{ x: number; left: number } | null>(null);
@@ -131,7 +237,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
 
   // Position as soon as a new cell is hovered (tooltip just mounted).
   useLayoutEffect(() => {
-    if (!hover) return;
+    if (!hoverCell) return;
     const tip = tipRef.current;
     if (!tip) return;
     // Jump to the new anchor without animating across the screen…
@@ -142,7 +248,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
       if (tipRef.current) tipRef.current.style.transition = "transform 90ms ease-out";
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hover]);
+  }, [hoverCell]);
 
   const onGridMouseMove = (e: React.MouseEvent) => {
     cursorRef.current = { x: e.clientX, y: e.clientY };
@@ -150,7 +256,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
       const el = areaRef.current;
       if (el) el.scrollLeft = dragRef.current.left - (e.clientX - dragRef.current.x);
     }
-    if (hover) placeTip();
+    if (hoverCell) placeTip();
 
     // Cursor-following spotlight, via CSS vars so cells never re-render.
     // Vars live on the outer (non-scrolling) scope so the ::after overlay
@@ -186,7 +292,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
         onMouseMove={onGridMouseMove}
         onMouseLeave={() => {
           endDrag();
-          setHover(null);
+          setHoverIdx(null);
         }}
       >
         <div
@@ -196,59 +302,22 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
           onMouseUp={endDrag}
         >
         {/* One block holds labels + columns so they always share the pitch */}
-        <div className="relative shrink-0" style={{ marginLeft: ROW_LABEL_W, width: blockW }}>
-          {/* Month labels along the top, aligned to the same column pitch */}
-          <div className="relative" style={{ height: 14, marginBottom: 6 }}>
-            {monthLabels.map((m, i) => (
-              <div
-                key={i}
-                className="absolute top-0 font-mono text-[10px] text-muted tracking-widest2 uppercase whitespace-nowrap"
-                style={{ left: m.col * pitch }}
-              >
-                {m.label}
-              </div>
-            ))}
-          </div>
-          {/* Week columns — one uniform gap on both axes */}
-          <div className="flex" style={{ gap, height: blockH }}>
-            {weeksArr(weeks).map((_, wi) => (
-              <div
-                key={wi}
-                className="flex flex-col shrink-0"
-                style={{ gap, width: cell }}
-              >
-                {cells.slice(wi * DAYS, wi * DAYS + DAYS).map((c, di) => {
-                  const v = c.tokens;
-                  const ratio = maxTokens ? v / maxTokens : 0;
-                  const empty = c.date === "";
-                  return (
-                    <div
-                      key={di}
-                      onMouseEnter={empty ? undefined : () => setHover(c)}
-                      className={`heat-cell rounded-[2px] border border-ink-700 shrink-0 ${empty ? "opacity-0" : ""}`}
-                      style={{
-                        width: cell,
-                        height: cell,
-                        background: v
-                          ? rgba("signal", ratio)
-                          : "transparent",
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+        <div
+          ref={blockRef}
+          className="relative shrink-0"
+          style={{ marginLeft: ROW_LABEL_W, width: blockW }}
+        >
+          {gridBody}
         </div>
         </div>
       </div>
 
-      {hover && (
+      {hoverCell && (
         <div
           ref={tipRef}
           className="fixed left-0 top-0 z-50 pointer-events-none will-change-transform"
         >
-          <HeatTooltip cell={hover} />
+          <HeatTooltip cell={hoverCell} />
         </div>
       )}
     </section>

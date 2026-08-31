@@ -212,17 +212,21 @@ export function TokenTrend({ days }: { days: DailyActivity[] }) {
                 payload?.[0]?.payload?.fullDate ?? ""
               }
             />
+            {/* Always mounted so toggling modes doesn't resize the plot area
+                and shift the x-axis; invisible in total view. */}
+            <Legend
+              wrapperStyle={{
+                fontFamily: "JetBrains Mono, monospace",
+                fontSize: 10,
+                color: "#8A93A1",
+                paddingTop: 10,
+                visibility: mode === "total" ? "hidden" : "visible",
+              }}
+              iconType="plainrect"
+              iconSize={8}
+            />
             {mode === "stacked" ? (
               <>
-                <Legend
-                  wrapperStyle={{
-                    fontFamily: "JetBrains Mono, monospace",
-                    fontSize: 10,
-                    color: "#8A93A1",
-                  }}
-                  iconType="plainrect"
-                  iconSize={8}
-                />
                 <Area type="monotone" dataKey="cacheRead" name="cache read" stackId="1"
                   stroke="#6FE3C2" fill="#6FE3C2" fillOpacity={0.3} strokeWidth={1} />
                 <Area type="monotone" dataKey="input" name="input" stackId="1"

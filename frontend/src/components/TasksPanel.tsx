@@ -88,12 +88,16 @@ export function TasksPanel({ tasks }: { tasks: TaskStats }) {
             return (
               <div
                 key={i}
-                onMouseEnter={count ? () => setHover(i) : undefined}
-                style={{ height: `${height}%` }}
-                className={`task-bar w-full rounded-sm ${
-                  count ? "bg-signal/60" : "bg-ink-700/60"
-                }`}
-              />
+                onMouseEnter={() => setHover(i)}
+                className="task-col flex-1 h-full flex items-end"
+              >
+                <div
+                  style={{ height: `${height}%` }}
+                  className={`task-bar w-full rounded-sm ${
+                    count ? "bg-signal/60" : "bg-ink-700/60"
+                  }`}
+                />
+              </div>
             );
           })}
         </div>
