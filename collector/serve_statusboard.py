@@ -54,26 +54,39 @@ class _SilentHandler(http.server.SimpleHTTPRequestHandler):
         if " 5" in format or " 4" in format:
             sys.stderr.write("%s - %s\n" % (self.address_string(), format % args))
 
-    def do_GET(self):  # noqa: N802
-        # The freshly generated statusboard.json lives in the project root;
-        # the served dist dir may hold a stale copy from a previous build.
+    def _serve_fresh_json(self, include_body: bool) -> bool:
+        """Intercept /statusboard.json and serve the freshly generated root
+        artifact (the dist dir may hold a stale copy from a previous build).
+
+        Handles GET and HEAD identically at the header level — HEAD-style
+        health checks must not fall through to the static handler, which
+        would 404 now that dist no longer carries a mirror copy.
+        Returns True when the request was handled.
+        """
         url_path = self.path.split("?", 1)[0].split("#", 1)[0].lstrip("/")
         fresh_json = getattr(self.server, "fresh_json", None)
-        if url_path == "statusboard.json" and fresh_json is not None and fresh_json.exists():
-            body = fresh_json.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            # Tell the UI when the artifact is no longer being refreshed
-            # (build failures fall back to last-known-good silently).
-            stale_since = getattr(self.server, "stale_since", None)
-            if stale_since is not None:
-                self.send_header("X-Statusboard-Stale", str(int(stale_since)))
-            self.end_headers()
+        if url_path != "statusboard.json" or fresh_json is None or not fresh_json.exists():
+            return False
+        body = fresh_json.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        # Tell the UI when the artifact is no longer being refreshed
+        # (build failures fall back to last-known-good silently).
+        stale_since = getattr(self.server, "stale_since", None)
+        if stale_since is not None:
+            self.send_header("X-Statusboard-Stale", str(int(stale_since)))
+        self.end_headers()
+        if include_body:
             self.wfile.write(body)
+        return True
+
+    def do_GET(self):  # noqa: N802
+        if self._serve_fresh_json(include_body=True):
             return
 
+        url_path = self.path.split("?", 1)[0].split("#", 1)[0].lstrip("/")
         # Translate / to serve index.html for app routes.
         # If the requested path maps to a file, serve it; else fall back to index.html.
         root = Path(self.directory) if self.directory else Path.cwd()
@@ -99,6 +112,11 @@ class _SilentHandler(http.server.SimpleHTTPRequestHandler):
             return super().do_GET()
         finally:
             self.path = original
+
+    def do_HEAD(self):  # noqa: N802
+        if self._serve_fresh_json(include_body=False):
+            return
+        return super().do_HEAD()
 
 
 class _ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):

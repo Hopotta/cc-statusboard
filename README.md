@@ -172,8 +172,9 @@ its daily rollup also covers other agents' session logs (`~/.codex` — the
 gpt-*/codex-* models). The artifact's cross-check (`meta.totalTokensDiffPct`)
 therefore compares only the models both sides see, excluding ccusage's
 other-agent volume into `meta.ccusageOtherAgentsTokens`; on the same model
-universe the native total runs ~1% above ccusage's (which deduplicates
-sessions resumed across files).
+universe the two totals agree to within ±0.05% on a fresh reconciliation
+(the diff drifts slightly positive while the ccusage cache ages — read it
+together with `meta.ccusageReconciledAt`).
 
 ## Adding a new agent
 
