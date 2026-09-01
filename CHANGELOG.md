@@ -2,6 +2,54 @@
 
 All notable changes to cc-statusboard will be documented in this file.
 
+## [0.4.1] - 2026-09-01
+
+Second external-review pass (maintainer-standard): semantics honesty, schema
+contract, privacy.  No reachable-data number changes except where noted.
+
+### Changed
+
+- **Pricing fallback denominator** switched from `priced cost ÷ all tokens` to
+  `priced cost ÷ priced tokens` — the standard weighted average of the priced
+  universe, no longer diluted by unpriced volume.  Only affects models with no
+  pricing-table entry at all (none exist in current data); explicit $0 prices
+  (e.g. free/unknown-price models reported at cost 0 by ccusage) are honored
+  as-is and never trigger the fallback.
+- `statusboard.json` is now a declared contract: `collector/contracts.py`
+  defines the full artifact shape (`StatusboardArtifact` + every block),
+  mirroring `frontend/src/types.ts` one-to-one.  Documentation-grade typing at
+  the aggregation boundary — internals stay plain dicts.
+- `activeSeconds` documented as **inferred interaction time** (bounded
+  inter-task interval, cap 2 h) — not measured execution time.  Name kept for
+  artifact compatibility.
+
+### Added
+
+- `meta.pricingCoverage`: share of native tokens covered by a model-level
+  price (0–1), so dollar estimates can be read together with how much is
+  table-priced vs fallback-estimated; the Spend tile tooltip reports it.
+- `advanced.promptCategories.classifierVersion` ("v1"): the heuristic split is
+  a product rule, and regex edits must now be versioned so category-share
+  shifts are attributable; the panel shows the version.
+
+### Fixed
+
+- `tasks.longestSeconds` no longer falls back to the longest project average —
+  two different statistics conflated.  When no task intervals were observed it
+  stays 0 ("unknown"); `longestAverageSeconds` remains the honest project-level
+  stat.  The removed fallback was provably value-identical for reachable data.
+- Project/session `averageSeconds` divide by the real task count (zero tasks →
+  0, not `activeSeconds / 1`); the old `max(1, tasks)` guard could never change
+  a reachable value but obscured the semantics.
+- Privacy: the workflow timeline no longer carries `"file"` — an absolute
+  local path (`C:\Users\…\projects\…`) the frontend never read.  The artifact
+  now contains no machine paths beyond `projectPath`.
+- README gained the project's core invariants as first-class docs: privacy
+  boundary (aggregate-only artifact), native = authoritative / ccusage =
+  eventually-consistent oracle, pricing semantics, `activeSeconds` semantics.
+  The fingerprint's append-only assumption and `FileScan`'s "observed facts
+  only" boundary are now stated invariants in the code.
+
 ## [0.4.0] - 2026-08-31
 
 ### Changed

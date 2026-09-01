@@ -116,9 +116,15 @@ export default function App() {
                       : "cumulative · estimated"
                 }
                 title={
-                  "Estimated spend: tokens priced with blended per-model rates " +
-                  "derived from ccusage (LiteLLM). Treat as a rough reference " +
-                  "(±10% or worse on router models), not a bill."
+                  (data.meta?.pricingCoverage != null &&
+                    data.meta.pricingCoverage < 1
+                    ? `${Math.round(data.meta.pricingCoverage * 100)}% of tokens ` +
+                      "have a model-level price; the rest is estimated at the " +
+                      "blended average of priced models. "
+                    : "") +
+                  "Tokens are priced with blended per-model rates derived from " +
+                  "ccusage (LiteLLM). Treat as a rough reference (±10% or worse " +
+                  "on router models), not a bill."
                 }
               />
               <StatTile
@@ -166,6 +172,7 @@ export default function App() {
               <PromptCategories
                 categories={data.advanced.promptCategories.categories}
                 total={data.advanced.promptCategories.total}
+                classifierVersion={data.advanced.promptCategories.classifierVersion}
               />
               <div className="lg:col-span-2">
                 <ToolUsage toolUsage={data.advanced.toolUsage} />

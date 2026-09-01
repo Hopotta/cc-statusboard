@@ -8,9 +8,11 @@ import type { PromptCategory } from "../types";
 export function PromptCategories({
   categories,
   total,
+  classifierVersion,
 }: {
   categories: PromptCategory[];
   total: number;
+  classifierVersion?: string;
 }) {
   const ordered = [...categories].sort((a, b) => b.count - a.count);
   const max = Math.max(1, ...ordered.map((c) => c.count));
@@ -22,7 +24,10 @@ export function PromptCategories({
         <h2 className="font-mono text-sm tracking-widest2 uppercase text-muted">
           Prompt categories
         </h2>
-        <span className="eyebrow">{total} prompts</span>
+        <span className="eyebrow">
+          {total} prompts
+          {classifierVersion ? ` · ${classifierVersion}` : ""}
+        </span>
       </div>
 
       {other && other.sharePct > 40 && (

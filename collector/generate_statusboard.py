@@ -29,7 +29,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, cast
 
 # Allow `python collector/generate_statusboard.py` from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -39,7 +39,13 @@ from collector.advanced import build as build_advanced  # noqa: E402
 from collector.watcher import watch_loop  # noqa: E402
 
 if TYPE_CHECKING:
-    from collector.contracts import FilterStats, ModelUsageRow, PricingInfo
+    from collector.contracts import (
+        FilterStats,
+        ModelUsageRow,
+        PricingInfo,
+        StatusboardArtifact,
+        StatusboardMeta,
+    )
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "statusboard.json"
 CCUSAGE_CACHE_PATH = Path(__file__).resolve().parent.parent / ".ccusage_cache.json"
@@ -72,7 +78,7 @@ def _warn_injection_share(filter_stats: Optional["FilterStats"]) -> None:
 
 
 def _build_meta(pricing_info: Optional["PricingInfo"],
-                native_models: List["ModelUsageRow"]) -> Dict[str, Any]:
+                native_models: List["ModelUsageRow"]) -> "StatusboardMeta":
     """Provenance metadata (status report §5.3): what is fresh by
     construction (everything native) vs. what leans on ccusage (pricing),
     plus the signed native-vs-ccusage totals cross-check.
@@ -94,18 +100,27 @@ def _build_meta(pricing_info: Optional["PricingInfo"],
     diff = None
     if prices and cc_total:
         diff = round((native_total - cc_total) / cc_total * 100, 2)
-    return {
+    # Share of the native token volume covered by a model-level price.
+    # A 0.0 price in the table counts as covered (explicit free/unknown
+    # pricing per ccusage); models absent from the table are the gap.
+    coverage = None
+    if prices and native_total:
+        priced = sum(m["totalTokens"] for m in native_models
+                     if m["modelName"] in prices)
+        coverage = round(priced / native_total, 4)
+    return cast("StatusboardMeta", {
         "pricingSource": "ccusage" if prices else "none",
         "pricingAsOf": as_of,
+        "pricingCoverage": coverage,
         "ccusageReconciledAt": as_of,
         "ccusageTotalTokens": cc_total,
         "ccusageOtherAgentsTokens": cc_other,
         "totalTokensDiffPct": diff,
-    }
+    })
 
 
 def build_statusboard(jsonl_root: Optional[Path] = None,
-                      cache_path: Optional[Path] = None) -> dict:
+                      cache_path: Optional[Path] = None) -> "StatusboardArtifact":
     """Run all collectors and return the merged dict (no I/O besides caches)."""
     t0 = time.monotonic()
     print("[1/4] jsonl: scanning projects ...", file=sys.stderr)
@@ -140,7 +155,8 @@ def build_statusboard(jsonl_root: Optional[Path] = None,
     return payload
 
 
-def write_statusboard(out_path: Path, payload: dict, pretty: bool = False) -> None:
+def write_statusboard(out_path: Path, payload: Mapping[str, Any],
+                      pretty: bool = False) -> None:
     """Atomically write statusboard.json.
 
     Writes go through a `*.tmp` sibling and are renamed with os.replace so
@@ -162,6 +178,7 @@ def write_statusboard(out_path: Path, payload: dict, pretty: bool = False) -> No
 
     s = payload.get("summary", {})
     meta = payload.get("meta", {})
+    top = s.get("mostUsedModel") or {}
     print(
         f"\n  -> wrote {out_path}\n"
         f"     totalTokens = {s.get('totalTokens'):,}"
@@ -169,7 +186,7 @@ def write_statusboard(out_path: Path, payload: dict, pretty: bool = False) -> No
         f"     totalTasks  = {s.get('totalTasks')}\n"
         f"     totalTime   = {s.get('totalTimeHuman')}\n"
         f"     avgTask     = {s.get('averageTaskHuman')}\n"
-        f"     topModel    = {s.get('mostUsedModel', {}).get('modelName')}\n"
+        f"     topModel    = {top.get('modelName')}\n"
         f"     pricing     = {meta.get('pricingSource')}"
         f" as of {meta.get('pricingAsOf') or 'never'}"
     )

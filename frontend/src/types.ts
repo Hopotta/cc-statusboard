@@ -53,6 +53,8 @@ export interface TaskStats {
 export interface StatusboardMeta {
   pricingSource: "ccusage" | "none";
   pricingAsOf: string | null;
+  /** Share of native tokens covered by a model-level price (0–1). */
+  pricingCoverage?: number | null;
   ccusageReconciledAt: string | null;
   ccusageTotalTokens: number | null;
   ccusageOtherAgentsTokens?: number | null;
@@ -118,7 +120,6 @@ export interface TimelineEvent {
 
 export interface TimelineSession {
   sessionId: string;
-  file: string;
   events: TimelineEvent[];
   firstEvent: string;
   lastEvent: string;
@@ -139,6 +140,8 @@ export interface PromptCategory {
 export interface PromptCategoriesPayload {
   categories: PromptCategory[];
   total: number;
+  /** Heuristic classifier version — bump together with the regexes. */
+  classifierVersion?: string;
 }
 
 export interface ModelEfficiency {

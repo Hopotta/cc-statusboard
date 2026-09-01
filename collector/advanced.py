@@ -36,6 +36,13 @@ if TYPE_CHECKING:
 # Order matters: debug guards its colloquial failure words before ui/run can
 # steal them; report precedes refactor so "更新readme" isn't a "refactor";
 # anchored acks (continue) can't steal real instructions.
+#
+# Bump PROMPT_CLASSIFIER_VERSION whenever the regexes or ordering change:
+# category shares are user-visible trends, and a silent classifier edit would
+# read as a behavior change.  The version ships in the artifact next to the
+# counts so consumers can tell the two apart.
+PROMPT_CLASSIFIER_VERSION = 1
+
 PROMPT_CATEGORIES: List[Tuple[str, str, List[str]]] = [
     ("debug", "Debug / fix", [
         r"\bbug\b", r"\bfix\b", r"\berror\b", r"\bcrash\b", r"\bbroken\b",
@@ -176,7 +183,9 @@ def build_workflow_timeline(scans: List[FileScan],
             events = head + tail
         out.append({
             "sessionId": s.path.stem,
-            "file": str(s.path),
+            # No local file path here: sessionId already identifies the
+            # session, and the artifact stays free of the machine's
+            # directory layout.
             "events": events,
             "firstEvent": events[0]["t"],
             "lastEvent": events[-1]["t"],
@@ -200,6 +209,7 @@ def build_prompt_categories(scans: List[FileScan]) -> Dict[str, Any]:
 
     total = sum(counts.values()) or 1
     return {
+        "classifierVersion": f"v{PROMPT_CLASSIFIER_VERSION}",
         "categories": [
             {
                 "slug": slug,

@@ -45,7 +45,13 @@ DEFAULT_TIMEOUT = 300  # seconds; 60 was set when the corpus was 10× smaller
 
 
 def ccusage_fingerprint(files: Iterable[Path]) -> str:
-    """Hash of the JSONL input set (path + size) — keys the ccusage cache."""
+    """Hash of the JSONL input set (path + size) — keys the ccusage cache.
+
+    Invariant: Claude Code session JSONL is treated as append-only, so
+    path + size is a sufficient change signal and the corpus is never
+    re-read just to hash it.  A same-size in-place rewrite would be missed
+    by design; that trade is what keeps the fingerprint O(files) stat-only.
+    """
     h = hashlib.sha1()
     for p in sorted(files, key=str):
         try:

@@ -106,8 +106,9 @@ cc-statusboard/
                        "tasks", "activeSeconds" }, ... ],
   "advanced": {
     "toolUsage":        { "tools": [...], "total", "uniqueTools", "byProject" },
-    "workflowTimeline": { "sessions": [...], "count" },
-    "promptCategories": { "categories": [...], "total", "examples" },
+    "workflowTimeline": { "sessions": [ { "sessionId", "events", "firstEvent",
+                                          "lastEvent" }, ... ], "count" },
+    "promptCategories": { "categories": [...], "total", "classifierVersion" },
     "modelEfficiency":  { "tokensPerTask", "costPerTask", "outputRatio",
                           "cacheShare", "cacheReadTokens",
                           "cacheCreationTokens", "inputTokens",
@@ -117,6 +118,7 @@ cc-statusboard/
   "meta": {
     "pricingSource": "ccusage | none",
     "pricingAsOf": "when the pricing table was last refreshed (or null)",
+    "pricingCoverage": "share of native tokens covered by a model-level price, 0–1 (or null)",
     "ccusageReconciledAt": "when ccusage last refreshed its cache (or null)",
     "ccusageTotalTokens": "ccusage's cross-check total over matched models (or null)",
     "ccusageOtherAgentsTokens": "ccusage volume from models absent natively (e.g. Codex CLI)",
@@ -134,12 +136,50 @@ cc-statusboard/
   to refresh the pricing table and cross-check the native totals; it can never
   stall a rebuild, and its absence only zeroes the dollar figures
   (`meta.pricingSource = "none"`).
+- **Data authority:** the native JSONL aggregation is authoritative and always
+  fresh; ccusage is an eventually-consistent external oracle (pricing may lag
+  usage by up to the reconcile interval — `meta.pricingAsOf` says when it was
+  last refreshed).  A failed ccusage run never deletes or corrupts the cache —
+  the last known-good pricing keeps serving.
 - **Storage:** `statusboard.json`, not SQLite — keeps the project portable and lets
   the UI be a pure static bundle.
 - **Frontend:** React + Vite + Tailwind + Recharts.  Mission-control palette
   (deep ink, signal amber, mint, sun).  JetBrains Mono for telemetry, Inter for UI.
 - **No telemetry leaves your machine** — everything is local.  The dashboard talks
   only to the local Python server.
+
+## Privacy boundary
+
+The pipeline is `raw logs → local processing → aggregate-only artifact`, and
+that last step is deliberate:
+
+- **No prompt text ever enters `statusboard.json.**  Timeline events carry
+  labels (`user` / tool name), and prompt categories ship as counts only.
+  Your prompts may contain source code, file paths, or credentials — the
+  artifact is designed to be shareable without them.
+- **What does remain:** `projectPath` (the cwd a project was started in),
+  `sessionId` (opaque UUIDs), and model/tool names.  These are needed for the
+  tables to be useful; be aware they reveal your directory layout and project
+  names if you post the JSON publicly.
+- The workflow timeline identifies sessions by `sessionId` only — no local
+  file paths.
+
+## Pricing semantics
+
+Unit prices are blended per-model rates (ccusage daily `modelBreakdowns`:
+model cost ÷ model tokens).  Two cases a price table can express:
+
+- **Explicit $0** — the model appears in the table with cost 0 (free model,
+  or absent from ccusage's LiteLLM price list).  Honored as-is: the model
+  bills 0, never the fallback.
+- **Absent from the table** — no entry at all.  The model falls back to the
+  blended unit price of the priced universe (`priced cost ÷ priced tokens`).
+
+`meta.pricingCoverage` reports the share of native tokens covered by a
+model-level price, so an estimate like "~$195" can always be read together
+with how much of it is table-priced vs. fallback-estimated.  All dollar
+figures are approximations (±10% or worse on router models) — the UI marks
+every cost with a "~".
 
 ## Task counting rule
 
@@ -158,6 +198,13 @@ genuine user prompts.
 
 The 2-hour cap is intentional: a session can stay open for days while the user is
 AFK; without a cap, "active time" would conflate wall-clock with effort.
+
+Read `activeSeconds` as **inferred interaction time**, not measured execution
+time: the logs cannot separate Claude's work from the user's think time, so
+each "duration" is the bounded interval between consecutive user prompts.
+(The field name is kept for artifact compatibility; `longestSeconds` is the
+longest such observed interval, and stays 0 — "unknown" — when no intervals
+exist rather than borrowing a project average.)
 
 ## Per-project token rule
 

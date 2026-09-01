@@ -160,7 +160,15 @@ def _parse_ts(ts: Any) -> Optional[datetime]:
 
 @dataclass
 class FileScan:
-    """Everything the dashboard needs from one JSONL file, from a single read."""
+    """Everything the dashboard needs from one JSONL file, from a single read.
+
+    Boundary invariant: a FileScan holds only FACTS OBSERVED during that
+    single file read (tokens, tool counts, task timestamps, raw cwd,
+    first/last ts) — never higher-order derivations (efficiency, shares,
+    categories).  Those live in the analytics layer (native_usage.py,
+    aggregator.py, advanced.py) so they can be recomputed without
+    re-reading the corpus.
+    """
     path: Path
     is_subagent: bool
     mtime: float = 0.0
@@ -329,6 +337,12 @@ def compute_active_time(timestamps: List[str]) -> int:
         For each task, duration = next_user_task_timestamp - this_task_timestamp,
         capped at MAX_TASK_DURATION_SECONDS (2h).
     Returns total active seconds.
+
+    Semantic note: this is an INFERENCE, not measured execution time.  Each
+    "duration" is the bounded interval between consecutive user prompts —
+    Claude's work and the user's think time are indistinguishable in the
+    logs.  The artifact keeps the `activeSeconds` name for compatibility;
+    read it as inferred interaction time.
     """
     if not timestamps:
         return 0

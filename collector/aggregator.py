@@ -26,10 +26,17 @@ the already-parsed/normalized data instead.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 if TYPE_CHECKING:
-    from .contracts import DailyUsageSlot, JsonlSummary, ModelUsageRow, TokenUsage, UsageTotals
+    from .contracts import (
+        DailyUsageSlot,
+        JsonlSummary,
+        ModelUsageRow,
+        StatusboardArtifact,
+        TokenUsage,
+        UsageTotals,
+    )
 
 
 def _fmt_seconds(secs: int) -> str:
@@ -118,7 +125,7 @@ def aggregate(
     ccusage_daily: List["DailyUsageSlot"],
     jsonl_summary: "JsonlSummary",
     advanced: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+) -> "StatusboardArtifact":
     """
     Build the final statusboard.json payload.
 
@@ -165,7 +172,6 @@ def aggregate(
 
     projects_out: List[Dict[str, Any]] = []
     for proj in jsonl_summary.get("projects", []):
-        proj_tasks = max(1, proj["tasks"])
         projects_out.append({
             "project": proj["project"],
             "projectPath": proj["projectPath"],
@@ -175,12 +181,13 @@ def aggregate(
             "tokens": proj.get("tokens", 0),
             "cost": round(price(proj.get("modelUsage")), 4),
             "files": proj["files"],
-            "averageSeconds": int(proj["activeSeconds"] / proj_tasks),
+            # A zero-task project has no average (its active time is 0 by
+            # construction — this guards adversarial input, not division).
+            "averageSeconds": int(proj["activeSeconds"] / proj["tasks"]) if proj["tasks"] else 0,
         })
 
     sessions_out: List[Dict[str, Any]] = []
     for sess in jsonl_summary.get("sessions", []):
-        sess_tasks = max(1, sess["tasks"])
         sessions_out.append({
             "sessionId": sess["sessionId"],
             "project": sess["project"],
@@ -191,7 +198,7 @@ def aggregate(
             "activeHuman": _fmt_seconds(sess["activeSeconds"]),
             "tokens": sess.get("tokens", 0),
             "cost": round(price(sess.get("modelUsage")), 4),
-            "averageSeconds": int(sess["activeSeconds"] / sess_tasks),
+            "averageSeconds": int(sess["activeSeconds"] / sess["tasks"]) if sess["tasks"] else 0,
             "firstTs": sess.get("firstTs"),
             "lastTs": sess.get("lastTs"),
         })
@@ -207,7 +214,7 @@ def aggregate(
         "totalCost": totals["totalCost"],
     }
 
-    return {
+    return cast("StatusboardArtifact", {
         "summary": summary,
         "tokens": {
             "total": totals["totalTokens"],
@@ -236,12 +243,10 @@ def aggregate(
             "activeHuman": _fmt_seconds(total_active),
             "averageSeconds": avg_task,
             "averageHuman": _fmt_seconds(avg_task),
-            # Real longest task from advanced analytics (falls back to project-mean).
-            "longestSeconds": (advanced or {}).get("taskDurations", {}).get("longest", 0)
-                or max(
-                    (p["averageSeconds"] for p in projects_out if p.get("tasks")),
-                    default=0,
-                ),
+            # Real longest inter-task interval from advanced analytics.
+            # Deliberately NO fallback: when no intervals were observed this
+            # stays 0 ("unknown") rather than borrowing a project average.
+            "longestSeconds": (advanced or {}).get("taskDurations", {}).get("longest", 0),
             "longestAverageSeconds": max(
                 (p.get("averageSeconds", 0) for p in projects_out if p.get("tasks")),
                 default=0,
@@ -258,4 +263,4 @@ def aggregate(
         "dailyActivity": daily,
         "advanced": advanced or {},
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-    }
+    })

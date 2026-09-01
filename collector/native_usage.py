@@ -40,11 +40,13 @@ def native_usage(scans: List[FileScan],
     """Roll scans up into {totals, models, daily}.
 
     `pricing` maps model name -> blended unit price (cost per token),
-    derived offline from ccusage's daily modelBreakdowns.  Models without
-    a price fall back to the global average unit price (priced cost /
-    all tokens) — the same fallback the project/session pricing uses.
-    Without pricing every cost is 0.0 and the artifact's `meta.pricing`
-    flags the gap.
+    derived offline from ccusage's daily modelBreakdowns.  A price of 0.0
+    present in the table is an explicit price (free model / missing from
+    ccusage's LiteLLM table) and is honored as-is.  Models with NO table
+    entry fall back to the blended unit price of the priced universe:
+    `priced_cost / priced_tokens` — the standard weighted average, not
+    diluted by unpriced volume.  Without pricing every cost is 0.0 and the
+    artifact's `meta.pricingSource` flags the gap.
     """
     models_acc: Dict[str, Dict[str, int]] = {}
     daily_acc: Dict[str, Dict[str, Dict[str, int]]] = {}
@@ -66,20 +68,22 @@ def native_usage(scans: List[FileScan],
         for f in _TOKEN_FIELDS:
             totals[f] += bucket[f]
     totals["totalTokens"] = sum(totals.values())
-    all_tokens = totals["totalTokens"]
 
-    # Two-pass pricing: priced models first, then the blended average for
-    # the rest (avg = priced cost / ALL tokens, mirroring the aggregator).
+    # Two-pass pricing: priced models first, then the blended average of
+    # the priced universe for models the table doesn't cover at all.
     costs: Dict[str, float] = {}
     priced_cost = 0.0
+    priced_tokens = 0
     if pricing:
         for name, bucket in models_acc.items():
             price = pricing.get(name)
             if price is not None:
-                c = round(sum(bucket[f] for f in _TOKEN_FIELDS) * price, 6)
+                tokens = sum(bucket[f] for f in _TOKEN_FIELDS)
+                c = round(tokens * price, 6)
                 costs[name] = c
                 priced_cost += c
-    avg_price = (priced_cost / all_tokens) if priced_cost and all_tokens else 0.0
+                priced_tokens += tokens
+    avg_price = (priced_cost / priced_tokens) if priced_cost and priced_tokens else 0.0
     for name, bucket in models_acc.items():
         if name not in costs:
             costs[name] = round(sum(bucket[f] for f in _TOKEN_FIELDS) * avg_price, 6)
