@@ -6,9 +6,9 @@ Single JSONL change watcher shared by both CLI entrypoints
 (`generate_statusboard --watch` and `serve_statusboard --watch`).
 
 Polls the projects dir every `interval` seconds; when any session file
-appears or grows, calls `on_change` (a full rebuild), keeping at least
-`cooldown` seconds between rebuilds so bursty writes don't cause
-back-to-back full regeneration.  A failing rebuild is printed and
+appears, changes size, or is removed, calls `on_change` (a full rebuild),
+keeping at least `cooldown` seconds between rebuilds so bursty writes don't
+cause back-to-back full regeneration.  A failing rebuild is printed and
 swallowed — a long-running watcher must never die from one bad cycle.
 """
 
@@ -54,6 +54,9 @@ def watch_loop(
             changed = False
             for path in current - seen:
                 print(f"[watch] new session: {path}", file=sys.stderr)
+                changed = True
+            for path in seen - current:
+                print(f"[watch] removed session: {path}", file=sys.stderr)
                 changed = True
             for path in current & seen:
                 if last_size.get(path) != current_sizes.get(path):
