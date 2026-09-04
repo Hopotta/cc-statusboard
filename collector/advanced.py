@@ -207,7 +207,7 @@ def build_prompt_categories(scans: List[FileScan]) -> Dict[str, Any]:
         for text in s.user_texts:
             counts[_classify_prompt(text)] += 1
 
-    total = sum(counts.values()) or 1
+    total = sum(counts.values())
     return {
         "classifierVersion": f"v{PROMPT_CLASSIFIER_VERSION}",
         "categories": [
@@ -215,7 +215,10 @@ def build_prompt_categories(scans: List[FileScan]) -> Dict[str, Any]:
                 "slug": slug,
                 "label": label_map.get(slug, slug),
                 "count": counts.get(slug, 0),
-                "sharePct": round(100 * counts.get(slug, 0) / total, 1),
+                "sharePct": (
+                    round(100 * counts.get(slug, 0) / total, 1)
+                    if total else 0
+                ),
             }
             for slug in [s for s, *_ in PROMPT_CATEGORIES] + ["other"]
         ],
@@ -283,13 +286,13 @@ def parse_model_efficiency(
     out = int(totals.get("outputTokens", 0) or 0)
     total = int(totals.get("totalTokens", 0) or 0)
     cost = float(totals.get("totalCost", 0.0) or 0.0)
-    total_tasks = jsonl_summary.get("totalTasks", 0) or 1
+    total_tasks = jsonl_summary.get("totalTasks", 0) or 0
 
     prompt_total = cache_read + cache_creation + inp
     cache_share = (cache_read / prompt_total) if prompt_total else 0.0
     return {
-        "tokensPerTask": int(total / total_tasks),
-        "costPerTask": round(cost / total_tasks, 4),
+        "tokensPerTask": int(total / total_tasks) if total_tasks else 0,
+        "costPerTask": round(cost / total_tasks, 4) if total_tasks else 0,
         "outputRatio": round(out / max(1, total), 4),
         "cacheShare": round(cache_share, 4),
         "cacheReadTokens": cache_read,
