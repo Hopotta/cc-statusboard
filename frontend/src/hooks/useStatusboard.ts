@@ -53,11 +53,11 @@ export function useStatusboard(intervalMs = 5000): UseStatusboardResult {
         // Only accept this response if it's still the current tick.
         if (epoch !== tickRef.current) return;
         setStaleSince(pendingStale);
+        setError(null);
         // Skip unchanged payloads (backend stamps every build with generatedAt).
         if (json.generatedAt && json.generatedAt === generatedAtRef.current) return;
         generatedAtRef.current = json.generatedAt;
         setData(json);
-        setError(null);
         setLastUpdated(new Date());
       })
       .catch((e: unknown) => {
