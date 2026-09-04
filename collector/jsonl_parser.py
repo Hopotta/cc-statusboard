@@ -158,6 +158,14 @@ def _parse_ts(ts: Any) -> Optional[datetime]:
         return None
 
 
+def _usage_int(value: Any) -> int:
+    """Convert one usage counter, treating unavailable values as zero."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 @dataclass
 class FileScan:
     """Everything the dashboard needs from one JSONL file, from a single read.
@@ -290,10 +298,10 @@ def _scan_file(path: Path, mtime: float, want_timeline: bool) -> FileScan:
                 if mid in seen_ids:
                     continue
                 seen_ids.add(mid)
-            inp = int(u.get("input_tokens", 0) or 0)
-            out = int(u.get("output_tokens", 0) or 0)
-            cc = int(u.get("cache_creation_input_tokens", 0) or 0)
-            cr = int(u.get("cache_read_input_tokens", 0) or 0)
+            inp = _usage_int(u.get("input_tokens", 0))
+            out = _usage_int(u.get("output_tokens", 0))
+            cc = _usage_int(u.get("cache_creation_input_tokens", 0))
+            cr = _usage_int(u.get("cache_read_input_tokens", 0))
             # Synthetic assistant entries (model "<synthetic>": error
             # bubbles, interrupt notices) carry an all-zero usage block —
             # not an API response, so not a model.  Skip before the bucket
