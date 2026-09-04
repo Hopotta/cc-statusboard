@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DailyActivity } from "../types";
-import { localISODate, formatLongDateTimeEn } from "../utils/date";
+import { utcISODate, formatLongDateTimeEn } from "../utils/date";
 
 /**
  * Contribution-style heatmap of daily token activity.  One row of week
@@ -372,30 +372,30 @@ function buildScrollyGrid(
   // as the old fixed grid), while `cells` spans the full history so the
   // user can pan back in time.
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const winStart = new Date(
-    today.getFullYear(),
-    today.getMonth() - (windowMonths - 1),
+  today.setUTCHours(0, 0, 0, 0);
+  const winStart = new Date(Date.UTC(
+    today.getUTCFullYear(),
+    today.getUTCMonth() - (windowMonths - 1),
     1,
-  );
-  while (winStart.getDay() !== 0) {
-    winStart.setDate(winStart.getDate() - 1);
+  ));
+  while (winStart.getUTCDay() !== 0) {
+    winStart.setUTCDate(winStart.getUTCDate() - 1);
   }
   const windowWeeks = cellsBetween(days, winStart, today).length / DAYS;
 
   let start = winStart;
   if (days.length) {
     const earliest = days.reduce((a, d) => (d.date < a ? d.date : a), days[0].date);
-    const e = new Date(
+    const e = new Date(Date.UTC(
       Number(earliest.slice(0, 4)),
       Number(earliest.slice(5, 7)) - 1,
       1,
-    );
+    ));
     // Lead in with six empty months before the earliest data so the
     // history can always be panned through.
-    e.setMonth(e.getMonth() - 6);
-    while (e.getDay() !== 0) {
-      e.setDate(e.getDate() - 1);
+    e.setUTCMonth(e.getUTCMonth() - 6);
+    while (e.getUTCDay() !== 0) {
+      e.setUTCDate(e.getUTCDate() - 1);
     }
     if (e < start) start = e;
   }
@@ -404,22 +404,22 @@ function buildScrollyGrid(
 
 function cellsBetween(days: DailyActivity[], start: Date, today: Date): Cell[] {
   // Dense grid: one cell per day from `start` (a Sunday) through today.
-  // Keyed by the user's LOCAL date string so the lookup matches what the
-  // Python parser wrote.  Padded with empty cells to a whole number of
+  // Keyed by UTC date strings so the lookup matches the collector contract.
+  // Padded with empty cells to a whole number of
   // weeks so every column has exactly 7 cells and the days line up
   // horizontally.
   const lookup = new Map(days.map((d) => [d.date, d]));
   const cells: Cell[] = [];
   const cursor = new Date(start);
   while (cursor <= today) {
-    const iso = localISODate(cursor);
+    const iso = utcISODate(cursor);
     const day = lookup.get(iso);
     cells.push({
       date: iso,
       tokens: day?.tokens ?? 0,
       tasks: day?.tasks ?? 0,
     });
-    cursor.setDate(cursor.getDate() + 1);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   while (cells.length % DAYS !== 0) {
     cells.push({ date: "", tokens: 0, tasks: 0 });

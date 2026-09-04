@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import type { DailyActivity } from "../types";
 import { formatTokens } from "../utils/format";
-import { localISODate, EN_MONTHS_LONG } from "../utils/date";
+import { utcISODate, EN_MONTHS_LONG } from "../utils/date";
 
 type RangeKey = "all" | "1m" | "3m" | "6m" | "1y" | "custom";
 
@@ -66,9 +66,9 @@ export function TokenTrend({ days }: { days: DailyActivity[] }) {
     }
     const months = RANGE_MONTHS[range]!;
     const cutoff = new Date();
-    cutoff.setDate(1);
-    cutoff.setMonth(cutoff.getMonth() - months + 1);
-    const iso = localISODate(cutoff);
+    cutoff.setUTCDate(1);
+    cutoff.setUTCMonth(cutoff.getUTCMonth() - months + 1);
+    const iso = utcISODate(cutoff);
     return days.filter((d) => d.date >= iso);
   }, [days, range, from, to]);
 

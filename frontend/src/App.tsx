@@ -13,7 +13,7 @@ import { PromptCategories } from "./components/PromptCategories";
 import { ModelEfficiency } from "./components/ModelEfficiency";
 import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { formatSeconds, formatTokens, formatUSD, formatPct, relativeTime } from "./utils/format";
-import { localISODate, formatDateTimeEn, formatTimeEn } from "./utils/date";
+import { utcISODate, formatDateTimeEn, formatTimeEn } from "./utils/date";
 
 export default function App() {
   const { data, loading, error, lastUpdated, reload, staleSince } =
@@ -24,10 +24,10 @@ export default function App() {
   const today = useMemo(() => {
     if (!data) return null;
     const byDate = new Map(data.dailyActivity.map((d) => [d.date, d]));
-    const todayRow = byDate.get(localISODate(new Date()));
+    const todayRow = byDate.get(utcISODate(new Date()));
     const yCursor = new Date();
-    yCursor.setDate(yCursor.getDate() - 1);
-    const yesterdayRow = byDate.get(localISODate(yCursor));
+    yCursor.setUTCDate(yCursor.getUTCDate() - 1);
+    const yesterdayRow = byDate.get(utcISODate(yCursor));
     return { todayRow, yesterdayRow };
   }, [data]);
 

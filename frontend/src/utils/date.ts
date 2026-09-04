@@ -1,17 +1,8 @@
-/**
- * Local-date helpers.
- *
- * The Python parser emits dates from `dt.date().isoformat()` (the user's local
- * timezone).  We mirror that on the frontend so date-string lookups match.
- *
- * `new Date().toISOString().slice(0, 10)` is wrong here — it would emit the UTC
- * date instead of the local one, which silently desyncs at any timezone boundary.
- */
-
-export function localISODate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+/** UTC `YYYY-MM-DD` key matching the collector's daily activity contract. */
+export function utcISODate(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
