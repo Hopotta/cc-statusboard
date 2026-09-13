@@ -41,10 +41,11 @@ def _add_windows_user_path(scripts_dir: Path) -> bool:
     import winreg
 
     target = os.path.normcase(os.path.normpath(str(scripts_dir)))
-    with winreg.CreateKeyEx(
-        winreg.HKEY_CURRENT_USER, "Environment", 0,
-        winreg.KEY_READ | winreg.KEY_SET_VALUE,
-    ) as key:
+    access = winreg.KEY_READ | winreg.KEY_SET_VALUE
+    # A 32-bit Python on 64-bit Windows otherwise writes the redirected HKCU
+    # view, while new 64-bit terminals read the native Environment key.
+    access |= getattr(winreg, "KEY_WOW64_64KEY", 0)
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, "Environment", 0, access) as key:
         try:
             current, value_type = winreg.QueryValueEx(key, "Path")
         except FileNotFoundError:
