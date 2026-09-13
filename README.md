@@ -37,6 +37,36 @@ Requires Python 3.9+. Install the project once to expose `cc-statusboard` on
 your PATH; after that it works from **any directory and terminal**. The
 installed package includes the built frontend, so Node is not needed to run it.
 
+### One-time setup
+
+Run the installer once from any directory:
+
+```bat
+# Windows (CMD / PowerShell; can also be double-clicked in Explorer)
+D:\vscode\py\amazing_ideas\cc-statusboard\bin\install.cmd
+```
+
+```bash
+# macOS / Linux (bash, zsh, fish, or sh)
+/path/to/cc-statusboard/bin/install
+```
+
+It installs the local checkout in editable mode and permanently configures the
+current user's command path (Windows user `Path`; macOS/Linux default-shell
+startup files). Close and reopen your terminal once; after that, from any
+directory, simply run:
+
+```bat
+cc-statusboard -w
+```
+
+No recurring `pip install`, `set PATH`, or project-directory navigation is
+needed. After a Git update, stop the running server with `Ctrl+C` and launch
+`cc-statusboard` again. Rerun the installer only if this project's Python
+dependencies or command definition changes.
+
+### Manual setup
+
 ```bash
 # Recommended: isolated install, with its command directory added to PATH.
 pipx install .
@@ -51,27 +81,6 @@ cc-statusboard
 # Watch Claude Code and Codex JSONL files for changes.
 cc-statusboard -w
 ```
-
-On Windows Command Prompt, `pipx` is optional and is not installed with
-Python by default. The following is the direct first-time setup for this
-checkout (run it from the project directory, not from `C:\\Users\\Lenovo`):
-
-```bat
-cd /d D:\vscode\py\amazing_ideas\cc-statusboard
-python -m pip install --user --editable .
-set "PATH=%APPDATA%\Python\Python311\Scripts;%PATH%"
-cc-statusboard -w
-```
-
-After that, pull updates, stop any running statusboard with `Ctrl+C`, and run
-`cc-statusboard` again. Reinstall only when the Python dependencies or the
-console-command definition in `pyproject.toml` changes.
-
-The `set` line makes the command available in that Command Prompt immediately.
-To make it available in every new terminal, add the directory printed by
-`python -m site --user-base` plus `\Python311\Scripts` to your user `Path`,
-then open a new terminal. (For the current environment that path is
-`C:\\Users\\Lenovo\\AppData\\Roaming\\Python\\Python311\\Scripts`.)
 
 `--watch` and `-w` are equivalent. Other common options are `-p 4000` (or
 `--port 4000`), `-n` (`--no-open`), `-V` (`--version`), and `-h` (`--help`).
@@ -106,13 +115,16 @@ cc-statusboard/
 │   ├── aggregator.py         # joins everything into statusboard.json
 │   ├── watcher.py            # shared JSONL change watcher (both CLI entrypoints)
 │   ├── generate_statusboard.py  # CLI: build + (optional) watch statusboard.json
+│   ├── install.py             # cross-platform editable install + user PATH setup
 │   ├── serve_statusboard.py  # CLI: serve the built frontend + open browser
 │   └── web-ui/               # versioned production frontend, shipped with the Python package
 ├── frontend/
 │   ├── src/                 # React + Vite + Tailwind + Recharts
 ├── bin/
 │   ├── cc-statusboard       # POSIX launcher
-│   └── cc-statusboard.cmd   # Windows launcher
+│   ├── cc-statusboard.cmd   # Windows launcher
+│   ├── install              # one-time macOS/Linux installer
+│   └── install.cmd          # one-time Windows installer
 ├── statusboard.json         # generated data artefact
 ├── CHANGELOG.md
 ├── LICENSE

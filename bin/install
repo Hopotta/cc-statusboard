@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# One-time macOS/Linux setup. Safe to run from any current directory.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+exec python3 "$PROJECT_ROOT/collector/install.py"

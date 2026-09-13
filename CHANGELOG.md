@@ -4,6 +4,13 @@ All notable changes to cc-statusboard will be documented in this file.
 
 ## [0.5.1] - 2026-09-13
 
+### Added
+
+- `bin/install` and `bin\\install.cmd`: one-time macOS/Linux and Windows
+  installers. They install this local checkout in editable mode and configure
+  the current user's command path, so subsequent terminals can run
+  `cc-statusboard` from any directory without manual `pip` or `set` commands.
+
 ### Fixed
 
 - A first global launch now rebuilds the served artifact after the background
