@@ -51,7 +51,7 @@ export interface TaskStats {
 
 /** Provenance metadata (native aggregation + ccusage reconciler). */
 export interface StatusboardMeta {
-  pricingSource: "ccusage" | "none";
+  pricingSource: "ccusage" | "openai-api" | "mixed" | "none";
   pricingAsOf: string | null;
   /** Share of native tokens covered by a model-level price (0–1). */
   pricingCoverage?: number | null;
@@ -86,7 +86,14 @@ export interface DailyActivity {
   activeSeconds: number;
 }
 
-export interface Statusboard {
+export interface AgentDescriptor {
+  id: string;
+  label: string;
+  state: "connected" | "placeholder";
+  source: string;
+}
+
+export interface StatusboardPayload {
   summary: StatusboardSummary;
   tokens: TokenTotals;
   models: ModelStat[];
@@ -103,6 +110,12 @@ export interface Statusboard {
   };
   generatedAt: string;
   meta?: StatusboardMeta;
+}
+
+export interface Statusboard extends StatusboardPayload {
+  /** Optional so a pre-agent artifact keeps rendering during an upgrade. */
+  agents?: AgentDescriptor[];
+  agentData?: Record<string, StatusboardPayload>;
 }
 
 export interface ToolUsage {

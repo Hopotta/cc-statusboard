@@ -34,13 +34,21 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, cast
 # Allow `python collector/generate_statusboard.py` from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from collector import aggregator, jsonl_parser, native_usage, reconcile  # noqa: E402
+from collector import (  # noqa: E402
+    aggregator,
+    codex_parser,
+    codex_pricing,
+    jsonl_parser,
+    native_usage,
+    reconcile,
+)
 from collector.advanced import build as build_advanced  # noqa: E402
 from collector.watcher import watch_loop  # noqa: E402
 
 if TYPE_CHECKING:
     from collector.contracts import (
         FilterStats,
+        AgentDescriptor,
         ModelUsageRow,
         PricingInfo,
         StatusboardArtifact,
@@ -119,32 +127,123 @@ def _build_meta(pricing_info: Optional["PricingInfo"],
     })
 
 
+def _build_codex_meta(native_models: List["ModelUsageRow"]) -> "StatusboardMeta":
+    """Describe the local Codex API-equivalent pricing estimate."""
+    coverage = codex_pricing.pricing_coverage(native_models)
+    return cast("StatusboardMeta", {
+        "pricingSource": "openai-api" if coverage else "none",
+        "pricingAsOf": codex_pricing.PRICING_AS_OF if coverage else None,
+        "pricingCoverage": coverage,
+        "ccusageReconciledAt": None,
+        "ccusageTotalTokens": None,
+        "ccusageOtherAgentsTokens": None,
+        "totalTokensDiffPct": None,
+    })
+
+
+def _build_combined_meta(claude_meta: "StatusboardMeta",
+                         codex_meta: "StatusboardMeta",
+                         claude_tokens: int, codex_tokens: int) -> "StatusboardMeta":
+    """Keep the distinct pricing provenance visible in the default view."""
+    total_tokens = claude_tokens + codex_tokens
+    priced_tokens = (
+        claude_tokens * float(claude_meta.get("pricingCoverage") or 0)
+        + codex_tokens * float(codex_meta.get("pricingCoverage") or 0)
+    )
+    sources = {claude_meta["pricingSource"], codex_meta["pricingSource"]} - {"none"}
+    source = "mixed" if len(sources) > 1 else (next(iter(sources)) if sources else "none")
+    return cast("StatusboardMeta", {
+        "pricingSource": source,
+        "pricingAsOf": codex_pricing.PRICING_AS_OF if codex_meta["pricingSource"] != "none"
+        else claude_meta.get("pricingAsOf"),
+        # `None` distinguishes no available price source from a known 0%
+        # model coverage figure.
+        "pricingCoverage": round(priced_tokens / total_tokens, 4) if total_tokens and sources else None,
+        "ccusageReconciledAt": claude_meta.get("ccusageReconciledAt"),
+        "ccusageTotalTokens": claude_meta.get("ccusageTotalTokens"),
+        "ccusageOtherAgentsTokens": claude_meta.get("ccusageOtherAgentsTokens"),
+        "totalTokensDiffPct": claude_meta.get("totalTokensDiffPct"),
+    })
+
+
+def _build_payload(scans: List[jsonl_parser.FileScan],
+                   usage: "Any") -> "StatusboardArtifact":
+    """Build one artifact body from a single adapter's scans and rollups."""
+    jsonl = jsonl_parser.summarize(scans)
+    _warn_injection_share(jsonl.get("filterStats"))
+    advanced = build_advanced(scans, totals=usage["totals"], jsonl_summary=jsonl)
+    return aggregator.aggregate(
+        usage["totals"], usage["models"], usage["daily"], jsonl,
+        advanced=advanced,
+    )
+
+
+def _agent_catalog() -> List["AgentDescriptor"]:
+    """The UI rail's source-of-truth, including intentionally inert cards."""
+    return [
+        {
+            "id": "claude-code", "label": "Claude Code",
+            "state": "connected", "source": "Claude session JSONL",
+        },
+        {
+            "id": "codex", "label": "Codex",
+            "state": "connected", "source": "Codex session JSONL",
+        },
+        {
+            "id": "gemini-cli", "label": "Gemini CLI",
+            "state": "placeholder", "source": "Adapter not connected",
+        },
+        {
+            "id": "aider", "label": "Aider",
+            "state": "placeholder", "source": "Adapter not connected",
+        },
+    ]
+
+
 def build_statusboard(jsonl_root: Optional[Path] = None,
                       cache_path: Optional[Path] = None) -> "StatusboardArtifact":
-    """Run all collectors and return the merged dict (no I/O besides caches)."""
+    """Run Claude Code and Codex collectors and return their unified artifact.
+
+    ``jsonl_root`` remains the Claude test/CLI override.  Supplying it makes
+    the build deliberately hermetic (no unrelated local Codex history leaks
+    into a fixture/custom-root build); the normal launcher passes no override
+    and reads both well-known directories.
+    """
     t0 = time.monotonic()
-    print("[1/4] jsonl: scanning projects ...", file=sys.stderr)
-    scans = jsonl_parser.scan_all(jsonl_root)
+    print("[1/4] jsonl: scanning Claude Code + Codex sessions ...", file=sys.stderr)
+    claude_scans = jsonl_parser.scan_all(jsonl_root)
+    codex_scans = [] if jsonl_root is not None else codex_parser.scan_all()
     t1 = time.monotonic()
 
     print("[2/4] native usage rollups (pricing from ccusage cache) ...",
           file=sys.stderr)
     cache_path = cache_path or CCUSAGE_CACHE_PATH
     pricing_info = reconcile.load_pricing(cache_path)
-    usage = native_usage.native_usage(
-        scans, pricing=pricing_info.get("prices") if pricing_info else None)
+    claude_usage = native_usage.native_usage(
+        claude_scans, pricing=pricing_info.get("prices") if pricing_info else None)
+    # Codex sessions do not include invoices.  Use published OpenAI API rates
+    # by token type as an explicitly labelled API-equivalent estimate; unknown
+    # internal aliases remain unpriced rather than inheriting Claude rates.
+    codex_usage = native_usage.native_usage(
+        codex_scans, pricing=codex_pricing.CODEX_PRICES, fallback_missing=False)
+    usage = native_usage.merge_usage_rollups([claude_usage, codex_usage])
 
     print("[3/4] advanced analytics ...", file=sys.stderr)
-    jsonl = jsonl_parser.summarize(scans)
-    _warn_injection_share(jsonl.get("filterStats"))
-    advanced = build_advanced(scans, totals=usage["totals"], jsonl_summary=jsonl)
-
     print("[4/4] aggregating ...", file=sys.stderr)
-    payload = aggregator.aggregate(
-        usage["totals"], usage["models"], usage["daily"], jsonl,
-        advanced=advanced,
+    payload = _build_payload(claude_scans + codex_scans, usage)
+    claude_payload = _build_payload(claude_scans, claude_usage)
+    claude_payload["meta"] = _build_meta(pricing_info, claude_usage["models"])
+    codex_payload = _build_payload(codex_scans, codex_usage)
+    codex_payload["meta"] = _build_codex_meta(codex_usage["models"])
+    payload["meta"] = _build_combined_meta(
+        claude_payload["meta"], codex_payload["meta"],
+        claude_usage["totals"]["totalTokens"], codex_usage["totals"]["totalTokens"],
     )
-    payload["meta"] = _build_meta(pricing_info, usage["models"])
+    payload["agents"] = _agent_catalog()
+    payload["agentData"] = {
+        "claude-code": claude_payload,
+        "codex": codex_payload,
+    }
     t2 = time.monotonic()
 
     print(
@@ -193,12 +292,12 @@ def write_statusboard(out_path: Path, payload: Mapping[str, Any],
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Build Claude Code statusboard.json")
+    p = argparse.ArgumentParser(description="Build coding-agent statusboard.json")
     p.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Output path")
     p.add_argument(
         "--watch",
         action="store_true",
-        help="Re-run on JSONL changes under ~/.claude/projects/",
+        help="Re-run on Claude Code or Codex JSONL changes",
     )
     p.add_argument(
         "--once",
@@ -228,7 +327,7 @@ def main() -> int:
 
     # Shared polling watcher (see collector/watcher.py).  Rebuild failures
     # are swallowed inside the loop so one bad cycle can't kill it.
-    print(f"[watch] watching {jsonl_parser.CLAUDE_PROJECTS_DIR} ...", file=sys.stderr)
+    print("[watch] watching Claude Code + Codex session logs ...", file=sys.stderr)
 
     # Background ccusage reconciler (A3): pricing + cross-check only.
     reconcile.spawn_reconciler(CCUSAGE_CACHE_PATH)

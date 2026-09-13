@@ -1,12 +1,13 @@
-# Claude Code Statusboard
+# Agent Statusboard
 
-A local Web Statusboard for **Claude Code** usage — token / cost / model / task / project
-analytics, with a mission-control-style UI built on top of your real session logs.
+A local Web Statusboard for **Claude Code and Codex** usage — token / cost /
+model / task / project analytics, with a mission-control-style UI built on top
+of your real session logs.
 
 ![Dashboard screenshot](example.png)
 
-> Built on Claude Code's JSONL session logs.  [`ccusage`](https://ccusage.com/) is
-> used as an offline pricing source and cross-check, never on the rebuild path.
+> Built on local Claude Code and Codex JSONL session logs.  [`ccusage`](https://ccusage.com/)
+> is used as Claude's offline pricing source and cross-check, never on the rebuild path.
 > Owns its own intermediate data layer (`statusboard.json`) so the data sources stay
 > swappable (Claude Code, Codex, OpenCode, custom agents).
 
@@ -24,9 +25,11 @@ analytics, with a mission-control-style UI built on top of your real session log
 | **Sessions**            | JSONL   | per-session tokens/cost/tasks ranking (sortable)                        |
 | **Advanced analytics**  | JSONL   | tool usage, prompt categories, model efficiency, workflow timeline      |
 
-All numbers are derived from your own `~/.claude/projects/*.jsonl` files — nothing
-is fabricated.  Dollar figures are estimates: tokens priced with blended per-model
-rates derived from ccusage's LiteLLM pricing, marked with "~" in the UI.
+All numbers are derived from your own `~/.claude/projects/*.jsonl` and
+`~/.codex/{sessions,archived_sessions}/*.jsonl` files — nothing is fabricated.
+Claude dollar figures use ccusage-derived blended rates; Codex figures use
+published OpenAI API-equivalent token rates, not an invoice for ChatGPT-plan
+usage. Both are marked with "~" in the UI.
 
 ## Quick start
 
@@ -60,6 +63,8 @@ cc-statusboard/
 ├── collector/
 │   ├── ccusage_parser.py     # wraps `ccusage` CLI, parses JSON (offline use)
 │   ├── jsonl_parser.py       # single-pass scan of ~/.claude/projects/ (tasks, time, tokens)
+│   ├── codex_parser.py       # single-pass scan of Codex rollout logs (old + new formats)
+│   ├── codex_pricing.py      # published OpenAI API-equivalent token-type rates
 │   ├── native_usage.py       # global totals / models / daily from the scans
 │   ├── reconcile.py          # background ccusage refresh: pricing + cross-check
 │   ├── advanced.py           # analytics from the scan (tools, prompts, efficiency, timeline)
@@ -116,14 +121,16 @@ cc-statusboard/
   },
   "generatedAt": "ISO-8601 UTC timestamp",
   "meta": {
-    "pricingSource": "ccusage | none",
+    "pricingSource": "ccusage | openai-api | mixed | none",
     "pricingAsOf": "when the pricing table was last refreshed (or null)",
     "pricingCoverage": "share of native tokens covered by a model-level price, 0–1 (or null)",
     "ccusageReconciledAt": "when ccusage last refreshed its cache (or null)",
     "ccusageTotalTokens": "ccusage's cross-check total over matched models (or null)",
     "ccusageOtherAgentsTokens": "ccusage volume from models absent natively (e.g. Codex CLI)",
     "totalTokensDiffPct": "(native - ccusage matched) / ccusage matched, signed percent"
-  }
+  },
+  "agents": [ { "id", "label", "state", "source" }, ... ],
+  "agentData": { "claude-code": { "…payload" }, "codex": { "…payload" } }
 }
 ```
 

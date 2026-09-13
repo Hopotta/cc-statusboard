@@ -22,21 +22,35 @@ and ccusage's own day boundaries.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Mapping, Optional, Union, cast
 
 from .jsonl_parser import FileScan
 from .contracts import UsageRollups
 
 _TOKEN_FIELDS = ("inputTokens", "outputTokens",
                  "cacheCreationTokens", "cacheReadTokens")
+Price = Union[float, Mapping[str, float]]
 
 
 def _empty_bucket() -> Dict[str, int]:
     return {f: 0 for f in _TOKEN_FIELDS}
 
 
+def _cost_bucket(bucket: Mapping[str, int], price: Price) -> float:
+    """Price one usage bucket with a blended or token-type-specific rate."""
+    if isinstance(price, (int, float)):
+        return sum(bucket.get(field, 0) for field in _TOKEN_FIELDS) * price
+    return (
+        bucket.get("inputTokens", 0) * price.get("input", 0.0)
+        + bucket.get("outputTokens", 0) * price.get("output", 0.0)
+        + bucket.get("cacheCreationTokens", 0) * price.get("cacheCreation", 0.0)
+        + bucket.get("cacheReadTokens", 0) * price.get("cacheRead", 0.0)
+    )
+
+
 def native_usage(scans: List[FileScan],
-                 pricing: Optional[Dict[str, float]] = None) -> UsageRollups:
+                 pricing: Optional[Mapping[str, Price]] = None,
+                 fallback_missing: bool = True) -> UsageRollups:
     """Roll scans up into {totals, models, daily}.
 
     `pricing` maps model name -> blended unit price (cost per token),
@@ -79,13 +93,13 @@ def native_usage(scans: List[FileScan],
             price = pricing.get(name)
             if price is not None:
                 tokens = sum(bucket[f] for f in _TOKEN_FIELDS)
-                c = round(tokens * price, 6)
+                c = round(_cost_bucket(bucket, price), 6)
                 costs[name] = c
                 priced_cost += c
                 priced_tokens += tokens
     avg_price = (priced_cost / priced_tokens) if priced_cost and priced_tokens else 0.0
     for name, bucket in models_acc.items():
-        if name not in costs:
+        if name not in costs and fallback_missing:
             costs[name] = round(sum(bucket[f] for f in _TOKEN_FIELDS) * avg_price, 6)
     total_cost = round(sum(costs.values()), 6)
 
@@ -114,8 +128,11 @@ def native_usage(scans: List[FileScan],
             for f in _TOKEN_FIELDS:
                 slot[f] += bucket[f]
             day_tokens = sum(bucket[f] for f in _TOKEN_FIELDS)
-            price = (pricing or {}).get(name, avg_price)
-            slot_cost += round(day_tokens * price, 6)
+            price = (pricing or {}).get(name)
+            if price is not None:
+                slot_cost += round(_cost_bucket(bucket, price), 6)
+            elif fallback_missing:
+                slot_cost += round(day_tokens * avg_price, 6)
         slot["totalCost"] = round(slot_cost, 6)
         slot["totalTokens"] = sum(slot[f] for f in _TOKEN_FIELDS)
         daily.append(slot)
@@ -125,3 +142,49 @@ def native_usage(scans: List[FileScan],
         "models": models,
         "daily": daily,
     })
+
+
+def merge_usage_rollups(rollups: List[UsageRollups]) -> UsageRollups:
+    """Combine already-priced agent rollups without leaking one price table
+    into another agent's models.
+
+    Claude's ccusage-derived prices must never be used as a fallback for
+    Codex rows.  Merge after each adapter has independently computed usage
+    and cost instead.
+    """
+    models_acc: Dict[str, Dict[str, Any]] = {}
+    daily_acc: Dict[str, Dict[str, Any]] = {}
+
+    for rollup in rollups:
+        for model in rollup["models"]:
+            acc = models_acc.setdefault(model["modelName"], {
+                "modelName": model["modelName"],
+                "totalTokens": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheCreationTokens": 0,
+                "cacheReadTokens": 0,
+                "cost": 0.0,
+            })
+            for key in (*_TOKEN_FIELDS, "totalTokens"):
+                acc[key] += model.get(key, 0)
+            acc["cost"] += model.get("cost", 0.0)
+        for day in rollup["daily"]:
+            acc = daily_acc.setdefault(day["date"], {
+                "date": day["date"], "totalTokens": 0, "totalCost": 0.0,
+                **_empty_bucket(),
+            })
+            for key in (*_TOKEN_FIELDS, "totalTokens"):
+                acc[key] += day.get(key, 0)
+            acc["totalCost"] += day.get("totalCost", 0.0)
+
+    models: List[Dict[str, Any]] = sorted(
+        models_acc.values(), key=lambda row: row["totalTokens"], reverse=True)
+    daily: List[Dict[str, Any]] = [daily_acc[day] for day in sorted(daily_acc)]
+    totals: Dict[str, Any] = _empty_bucket()
+    for merged_model in models:
+        for key in _TOKEN_FIELDS:
+            totals[key] += merged_model[key]
+    totals["totalTokens"] = sum(totals.values())
+    totals["totalCost"] = round(sum(float(model["cost"]) for model in models), 6)
+    return cast(UsageRollups, {"totals": totals, "models": models, "daily": daily})

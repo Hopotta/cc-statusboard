@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStatusboard } from "./hooks/useStatusboard";
 import { HeroReadout } from "./components/HeroReadout";
 import { StatTile } from "./components/StatTile";
@@ -14,22 +14,57 @@ import { ModelEfficiency } from "./components/ModelEfficiency";
 import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { formatSeconds, formatTokens, formatUSD, formatPct, relativeTime } from "./utils/format";
 import { utcISODate, formatDateTimeEn, formatTimeEn } from "./utils/date";
+import { connectedAgentIds, selectAgentData } from "./utils/agentData";
+import type { AgentDescriptor } from "./types";
 
 export default function App() {
   const { data, loading, error, lastUpdated, reload, staleSince } =
     useStatusboard(5000);
+  const [selectedAgents, setSelectedAgents] = useState<Set<string> | null>(null);
+  const agents = data?.agents ?? legacyAgents;
+  const effectiveSelected = selectedAgents ?? new Set(agents.map((agent) => agent.id));
+  const visibleData = data ? selectAgentData(data, effectiveSelected) : null;
+  const selectedConnected = data
+    ? connectedAgentIds(data).filter((id) => effectiveSelected.has(id))
+    : [];
+  const selectedLabels = agents
+    .filter((agent) => selectedConnected.includes(agent.id))
+    .map((agent) => agent.label);
+  const allConnectedSelected = data && selectedConnected.length === connectedAgentIds(data).length;
+  const heroTitle = allConnectedSelected
+    ? "Agent Statusboard"
+    : selectedLabels.length === 1
+      ? `${selectedLabels[0]} Statusboard`
+      : selectedLabels.length > 1
+        ? "Selected Agents Statusboard"
+        : "No connected agent selected";
+  const heroSource = allConnectedSelected
+    ? "Claude JSONL + Codex JSONL · mixed estimates"
+    : selectedLabels.length === 1 && selectedLabels[0] === "Codex"
+      ? "Codex session JSONL · OpenAI API-equivalent"
+      : selectedLabels.length === 1
+        ? "Claude session JSONL · ccusage pricing"
+        : "Select a connected source";
+  const pricingSource = visibleData?.meta?.pricingSource ?? "none";
+  const costHint = pricingSource === "openai-api"
+    ? "API-equivalent estimate from published OpenAI token-type rates; Codex plan usage is not an API invoice."
+    : pricingSource === "mixed"
+      ? "Claude uses ccusage-derived estimates; Codex uses published OpenAI API-equivalent rates. This is not a combined invoice."
+      : pricingSource === "ccusage"
+        ? "Estimated: blended per-model rates derived from ccusage (LiteLLM); a rough reference, not a bill."
+        : "This selected source has no local pricing adapter yet.";
 
   // Today vs yesterday token usage (daily rows are UTC-keyed; the heatmap
   // uses the same lookup convention).
   const today = useMemo(() => {
-    if (!data) return null;
-    const byDate = new Map(data.dailyActivity.map((d) => [d.date, d]));
+    if (!visibleData) return null;
+    const byDate = new Map(visibleData.dailyActivity.map((d) => [d.date, d]));
     const todayRow = byDate.get(utcISODate(new Date()));
     const yCursor = new Date();
     yCursor.setUTCDate(yCursor.getUTCDate() - 1);
     const yesterdayRow = byDate.get(utcISODate(yCursor));
     return { todayRow, yesterdayRow };
-  }, [data]);
+  }, [visibleData]);
 
   return (
     <div className="min-h-screen bg-ink-950 text-fg">
@@ -51,19 +86,47 @@ export default function App() {
         ) : (
           <>
             <HeroReadout
-              totalTokens={data.summary.totalTokens}
-              cost={data.tokens.cost}
+              totalTokens={visibleData?.summary.totalTokens ?? 0}
+              cost={visibleData?.tokens.cost ?? 0}
               generatedAt={data.generatedAt}
+              title={heroTitle}
+              source={heroSource}
+              showCost={pricingSource !== "none"}
+              costHint={costHint}
+              agents={agents}
+              selectedAgents={effectiveSelected}
+              onSelectedAgentsChange={setSelectedAgents}
             />
 
-            <SectionHeader
+            {!visibleData ? (
+              <NoConnectedAgent />
+            ) : (
+              <DashboardBody data={visibleData} today={today} />
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function DashboardBody({ data, today }: { data: NonNullable<ReturnType<typeof selectAgentData>>; today: { todayRow: typeof data.dailyActivity[number] | undefined; yesterdayRow: typeof data.dailyActivity[number] | undefined } | null }) {
+  const priceNote = data.meta?.pricingSource === "openai-api"
+    ? "API-equivalent estimate from published OpenAI token-type rates; Codex plan usage is not an API invoice."
+    : data.meta?.pricingSource === "mixed"
+      ? "Claude uses ccusage-derived estimates; Codex uses published OpenAI API-equivalent rates. This is not a combined invoice."
+      : "Tokens are priced with blended per-model rates derived from ccusage (LiteLLM). Treat as a rough reference (±10% or worse on router models), not a bill.";
+  return (
+    <>
+
+      <SectionHeader
               index="01"
               title="Overview"
               sub="daily activity, tokens, models, tasks, projects"
-            />
+      />
 
-            {/* Secondary metric strip */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      {/* Secondary metric strip */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               <StatTile
                 label="Total Time"
                 value={formatSeconds(data.summary.totalTime)}
@@ -119,12 +182,9 @@ export default function App() {
                   (data.meta?.pricingCoverage != null &&
                     data.meta.pricingCoverage < 1
                     ? `${Math.round(data.meta.pricingCoverage * 100)}% of tokens ` +
-                      "have a model-level price; the rest is estimated at the " +
-                      "blended average of priced models. "
+                      "have a model-level price; unpriced models contribute $0. "
                     : "") +
-                  "Tokens are priced with blended per-model rates derived from " +
-                  "ccusage (LiteLLM). Treat as a rough reference (±10% or worse " +
-                  "on router models), not a bill."
+                  priceNote
                 }
               />
               <StatTile
@@ -137,38 +197,38 @@ export default function App() {
                 sub="of prompt tokens"
                 accent="mint"
               />
-            </div>
+      </div>
 
-            {/* Heatmap fills its card and spreads its week columns; tasks keep a compact column */}
-            <div className="flex flex-col md:flex-row gap-6 items-stretch">
+      {/* Heatmap fills its card and spreads its week columns; tasks keep a compact column */}
+      <div className="flex flex-col md:flex-row gap-6 items-stretch">
               <div className="min-w-0 flex-1">
                 <ActivityHeatmap days={data.dailyActivity} />
               </div>
               <div className="min-w-0 md:w-80 xl:w-96 shrink-0">
                 <TasksPanel tasks={data.tasks} />
               </div>
-            </div>
+      </div>
 
-            {/* Token throughput — standalone */}
-            <TokenTrend days={data.dailyActivity} />
+      {/* Token throughput — standalone */}
+      <TokenTrend days={data.dailyActivity} />
 
-            {/* Models — standalone */}
-            <ModelDistribution models={data.models} />
+      {/* Models — standalone */}
+      <ModelDistribution models={data.models} />
 
-            {/* Project statusboard — standalone */}
-            <ProjectTable projects={data.projects} />
+      {/* Project statusboard — standalone */}
+      <ProjectTable projects={data.projects} />
 
-            {/* Per-session breakdown — standalone */}
-            <SessionTable sessions={data.sessions ?? []} />
+      {/* Per-session breakdown — standalone */}
+      <SessionTable sessions={data.sessions ?? []} />
 
-            {/* Phase 4: Advanced Analytics */}
-            <SectionHeader
+      {/* Phase 4: Advanced Analytics */}
+      <SectionHeader
               index="02"
               title="Advanced analytics"
               sub="tool usage, prompt categories, model efficiency, workflow timeline"
-            />
+      />
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <PromptCategories
                 categories={data.advanced.promptCategories.categories}
                 total={data.advanced.promptCategories.total}
@@ -177,9 +237,9 @@ export default function App() {
               <div className="lg:col-span-2">
                 <ToolUsage toolUsage={data.advanced.toolUsage} />
               </div>
-            </div>
+      </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {data.advanced.modelEfficiency && (
                 <ModelEfficiency efficiency={data.advanced.modelEfficiency} />
               )}
@@ -188,16 +248,28 @@ export default function App() {
                   sessions={data.advanced.workflowTimeline.sessions}
                 />
               </div>
-            </div>
+      </div>
 
-            <Footer
+      <Footer
               generatedAt={data.generatedAt}
               topModel={data.summary.mostUsedModel?.modelName ?? "—"}
               totalTokens={data.summary.totalTokens}
-            />
-          </>
-        )}
-      </main>
+      />
+    </>
+  );
+}
+
+const legacyAgents: AgentDescriptor[] = [
+  { id: "claude-code", label: "Claude Code", state: "connected", source: "Claude session JSONL" },
+];
+
+function NoConnectedAgent() {
+  return (
+    <div className="panel p-8 sm:p-10">
+      <p className="eyebrow text-signal">No telemetry selected</p>
+      <p className="mt-3 font-mono text-sm text-muted">
+        Choose Claude Code or Codex above. Placeholder agents stay visible so the rail can grow without changing its layout.
+      </p>
     </div>
   );
 }
@@ -245,7 +317,7 @@ function TopBar({
           <span className="font-mono text-sm tracking-widest2 uppercase">
             cc-statusboard
           </span>
-          <span className="eyebrow hidden sm:inline">v0.4</span>
+          <span className="eyebrow hidden sm:inline">v0.4.2</span>
         </div>
         <div className="flex items-center gap-4">
           <span className="font-mono text-[11px] text-muted">
@@ -331,7 +403,7 @@ function Footer({
       <FootCell label="Generated" value={formatDateTimeEn(new Date(generatedAt))} />
       <FootCell label="Top model" value={topModel} />
       <FootCell label="Total tokens" value={formatTokens(totalTokens, 2)} />
-      <FootCell label="Build" value="cc-statusboard v0.4" />
+      <FootCell label="Build" value="cc-statusboard v0.4.2" />
     </footer>
   );
 }

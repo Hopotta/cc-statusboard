@@ -181,6 +181,9 @@ class FileScan:
     is_subagent: bool
     mtime: float = 0.0
     cwd: Optional[str] = None                      # first raw cwd in the file
+    # Provider-native session identifier when the filename is a transport
+    # label (Codex names its files ``rollout-…``).
+    session_id: Optional[str] = None
     tokens: int = 0                                # deduped per message.id
     model_usage: Dict[str, Dict[str, int]] = field(default_factory=dict)
     # Deduped usage keyed by UTC date then model — feeds the native daily
@@ -478,6 +481,9 @@ def project_rollup(scans: List[FileScan]) -> List["ProjectSummaryRow"]:
             "tokens": tokens_total,
             "modelUsage": model_usage,
         })
+    # Empty launch/metadata files are not activity.  Keeping them used to
+    # create project rows containing an all-zero quartet of telemetry.
+    rollup = [row for row in rollup if row["tokens"] or row["tasks"] or row["activeSeconds"]]
     rollup.sort(key=lambda x: x["tasks"], reverse=True)
     return rollup
 
@@ -490,7 +496,7 @@ def session_rollup(scans: List[FileScan]) -> List["SessionSummaryRow"]:
     groups: Dict[str, List[FileScan]] = {}
     order: List[str] = []
     for s in scans:
-        uuid = s.path.parent.parent.name if s.is_subagent else s.path.stem
+        uuid = s.path.parent.parent.name if s.is_subagent else (s.session_id or s.path.stem)
         if uuid not in groups:
             groups[uuid] = []
             order.append(uuid)
@@ -530,6 +536,9 @@ def session_rollup(scans: List[FileScan]) -> List["SessionSummaryRow"]:
             "firstTs": anchor.first_ts,
             "lastTs": anchor.last_ts,
         })
+    # Do not represent metadata-only launch files as sessions.  A row is
+    # useful once it has observed at least one task, token, or active span.
+    sessions = [row for row in sessions if row["tokens"] or row["tasks"] or row["activeSeconds"]]
     sessions.sort(key=lambda x: x["tokens"], reverse=True)
     return sessions
 

@@ -2,6 +2,37 @@
 
 All notable changes to cc-statusboard will be documented in this file.
 
+## [0.4.2] - 2026-09-13
+
+### Added
+
+- Multi-agent source rail below the hero readout. It supports All and
+  multi-selecting Claude Code, Codex, and future placeholder adapters; the
+  initial view selects every source.
+- Codex session collection for active and archived local rollout JSONL files.
+  Its data drives the same tokens, models, activity, projects, sessions and
+  advanced-analysis panels as Claude Code.
+- Local copies of the real Anthropic mark (Simple Icons, CC0) and the official
+  OpenAI Blossom are used for the connected-agent controls.
+- Codex API-equivalent cost estimates for locally identified GPT-5.6 Sol,
+  Terra and Luna models, using published OpenAI input, cached-input, cache
+  write and output rates. The UI distinguishes this estimate from an invoice.
+
+### Fixed
+
+- Older Codex rollouts now read usage from legacy
+  `event_msg/token_count.info.{total,last}_token_usage` records, instead of
+  displaying projects and sessions with tasks but no tokens.
+- Metadata-only/imported Codex transcript stubs are excluded from usage task,
+  project and session rollups, eliminating all-zero telemetry rows and their
+  artificial hour-of-day spike.
+- Codex sessions use their native session ID from `session_meta` rather than
+  the transport filename prefix (`rollout-…`).
+- Cost provenance is now explicit in the combined view: Claude uses ccusage
+  estimates; Codex uses published OpenAI API-equivalent rates; undocumented
+  internal aliases remain visibly unpriced rather than borrowing another
+  model's rate.
+
 ## [0.4.1] - 2026-09-01
 
 Second external-review pass (maintainer-standard): semantics honesty, schema

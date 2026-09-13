@@ -21,13 +21,14 @@ import traceback
 from pathlib import Path
 from typing import Callable, Dict, Optional, Set
 
+from .codex_parser import iter_jsonl_files as iter_codex_jsonl_files
 from .jsonl_parser import iter_jsonl_files
 
 
 def _snapshot() -> tuple[Set[str], Dict[str, int]]:
     seen: Set[str] = set()
     sizes: Dict[str, int] = {}
-    for p in iter_jsonl_files():
+    for p in (*iter_jsonl_files(), *iter_codex_jsonl_files()):
         path_str = str(p)
         seen.add(path_str)
         try:

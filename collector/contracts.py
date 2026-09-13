@@ -251,13 +251,20 @@ class Advanced(TypedDict):
 
 
 class StatusboardMeta(TypedDict):
-    pricingSource: Literal["ccusage", "none"]
+    pricingSource: Literal["ccusage", "openai-api", "mixed", "none"]
     pricingAsOf: Optional[str]
     pricingCoverage: NotRequired[Optional[float]]
     ccusageReconciledAt: Optional[str]
     ccusageTotalTokens: Optional[int]
     ccusageOtherAgentsTokens: NotRequired[Optional[int]]
     totalTokensDiffPct: Optional[float]
+
+
+class AgentDescriptor(TypedDict):
+    id: str
+    label: str
+    state: Literal["connected", "placeholder"]
+    source: str
 
 
 class StatusboardArtifact(TypedDict):
@@ -272,3 +279,8 @@ class StatusboardArtifact(TypedDict):
     advanced: Advanced
     generatedAt: str
     meta: NotRequired[StatusboardMeta]
+    # AgentData values use this same public payload shape minus these two
+    # optional multi-agent fields.  ``Dict[str, object]`` avoids a recursive
+    # TypedDict declaration while the mirrored TypeScript type remains exact.
+    agents: NotRequired[List[AgentDescriptor]]
+    agentData: NotRequired[Dict[str, object]]

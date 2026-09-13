@@ -182,7 +182,10 @@ def build_workflow_timeline(scans: List[FileScan],
             tail = events[-(max_events_per_session // 2):]
             events = head + tail
         out.append({
-            "sessionId": s.path.stem,
+            # Codex transport filenames are named ``rollout-…``; expose the
+            # native session id when its metadata provides one, matching the
+            # Sessions table instead of repeating a meaningless prefix.
+            "sessionId": s.session_id or s.path.stem,
             # No local file path here: sessionId already identifies the
             # session, and the artifact stays free of the machine's
             # directory layout.

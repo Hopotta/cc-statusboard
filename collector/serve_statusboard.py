@@ -261,7 +261,7 @@ def main() -> int:
     print(f"\n[serve] cc-statusboard ready at {url}", file=sys.stderr)
     print(f"        serving from: {dist}", file=sys.stderr)
     if args.watch:
-        print("        watching ~/.claude/projects/ for changes", file=sys.stderr)
+        print("        watching Claude Code + Codex logs for changes", file=sys.stderr)
 
     if not args.no_open:
         # Defer a moment so the server has fully accepted connections.

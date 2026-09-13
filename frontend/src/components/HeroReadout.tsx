@@ -1,5 +1,7 @@
 import { formatTokens, formatTokensLong, formatUSD } from "../utils/format";
 import { formatLongDateTimeEn } from "../utils/date";
+import { AgentRail } from "./AgentRail";
+import type { AgentDescriptor } from "../types";
 
 /**
  * The signature element: a single oversized numeric readout (the flight-deck
@@ -10,10 +12,24 @@ export function HeroReadout({
   totalTokens,
   cost,
   generatedAt,
+  title,
+  source,
+  showCost,
+  costHint,
+  agents,
+  selectedAgents,
+  onSelectedAgentsChange,
 }: {
   totalTokens: number;
   cost: number;
   generatedAt: string;
+  title: string;
+  source: string;
+  showCost: boolean;
+  costHint: string;
+  agents: AgentDescriptor[];
+  selectedAgents: Set<string>;
+  onSelectedAgentsChange: (ids: Set<string>) => void;
 }) {
   // Use the actual host:port the dashboard was loaded from so the "Local" cell
   // stays correct when the launcher is invoked with --port.
@@ -30,7 +46,7 @@ export function HeroReadout({
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-3">
             <span className="live-dot" aria-hidden />
-            <span className="eyebrow">Claude Code Statusboard</span>
+            <span className="eyebrow">{title}</span>
           </div>
           <div>
             <div className="eyebrow mb-3">Tokens Processed</div>
@@ -49,17 +65,22 @@ export function HeroReadout({
         <div className="grid grid-cols-2 gap-x-10 gap-y-3 self-start lg:self-end">
           <Ornament
             label="Spend"
-            value={formatUSD(cost)}
-            title="Estimated: blended per-model rates derived from ccusage (LiteLLM); a rough reference, not a bill."
+            value={showCost ? formatUSD(cost) : "—"}
+            title={costHint}
           />
           <Ornament
             label="Generated"
             value={formatLongDateTimeEn(new Date(generatedAt))}
           />
-          <Ornament label="Source" value="jsonl · ccusage pricing" />
+          <Ornament label="Source" value={source} />
           <Ornament label="Local" value={`${host}:${port}`} />
         </div>
       </div>
+      <AgentRail
+        agents={agents}
+        selected={selectedAgents}
+        onChange={onSelectedAgentsChange}
+      />
     </header>
   );
 }
