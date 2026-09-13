@@ -74,7 +74,26 @@ function mergePayloads(bodies: StatusboardPayload[]): StatusboardPayload {
   const latest = bodies.reduce((latestValue, body) =>
     body.generatedAt > latestValue ? body.generatedAt : latestValue,
   bodies[0].generatedAt);
-  const allPricing = bodies.every((body) => body.meta?.pricingSource === "ccusage");
+  // A selection can combine independently priced adapters (Claude's ccusage
+  // estimate and Codex's API-equivalent rates).  The old ccusage-only check
+  // incorrectly downgraded that valid mixed selection to "none", which made
+  // the Spend tile claim that no pricing data was available.
+  const pricedBodies = bodies.filter(
+    (body) => body.meta?.pricingSource && body.meta.pricingSource !== "none",
+  );
+  const pricingSources = new Set(pricedBodies.map((body) => body.meta!.pricingSource));
+  const pricingSource = pricingSources.size > 1
+    ? "mixed"
+    : pricingSources.values().next().value ?? "none";
+  const coveredTokens = pricedBodies.reduce(
+    (sum, body) => sum + body.summary.totalTokens * (body.meta?.pricingCoverage ?? 0),
+    0,
+  );
+  const priceDates = pricedBodies
+    .map((body) => body.meta?.pricingAsOf)
+    .filter((date): date is string => Boolean(date));
+  const ccusageMetas = bodies.map((body) => body.meta)
+    .filter((meta): meta is NonNullable<StatusboardPayload["meta"]> => meta?.pricingSource === "ccusage");
 
   return {
     summary: {
@@ -130,7 +149,24 @@ function mergePayloads(bodies: StatusboardPayload[]): StatusboardPayload {
       },
     },
     generatedAt: latest,
-    meta: allPricing ? bodies[0].meta : { pricingSource: "none", pricingAsOf: null, ccusageReconciledAt: null, ccusageTotalTokens: null, totalTokensDiffPct: null },
+    meta: {
+      pricingSource,
+      pricingAsOf: priceDates.sort().at(-1) ?? null,
+      pricingCoverage: totalTokens && pricedBodies.length
+        ? coveredTokens / totalTokens
+        : null,
+      ccusageReconciledAt: ccusageMetas.map((meta) => meta.ccusageReconciledAt)
+        .filter((date): date is string => Boolean(date)).sort().at(-1) ?? null,
+      ccusageTotalTokens: ccusageMetas.reduce(
+        (sum, meta) => sum + (meta.ccusageTotalTokens ?? 0), 0,
+      ) || null,
+      ccusageOtherAgentsTokens: ccusageMetas.reduce(
+        (sum, meta) => sum + (meta.ccusageOtherAgentsTokens ?? 0), 0,
+      ) || null,
+      totalTokensDiffPct: ccusageMetas.length === 1
+        ? ccusageMetas[0].totalTokensDiffPct
+        : null,
+    },
   };
 }
 
