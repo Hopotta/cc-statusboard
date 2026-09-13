@@ -20,6 +20,8 @@ All notable changes to cc-statusboard will be documented in this file.
 - Global launches write generated `statusboard.json` and the ccusage cache to
   a user-writable platform data directory instead of site-packages. Existing
   project-local wrappers preserve their original checkout-root output.
+- Windows setup instructions now use Python's built-in `pip` path and explain
+  the one-time user `Scripts` PATH entry; `pipx` remains an optional installer.
 
 ## [0.4.2] - 2026-09-13
 

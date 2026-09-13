@@ -51,6 +51,23 @@ cc-statusboard
 cc-statusboard -w
 ```
 
+On Windows Command Prompt, `pipx` is optional and is not installed with
+Python by default. The following is the direct first-time setup for this
+checkout (run it from the project directory, not from `C:\\Users\\Lenovo`):
+
+```bat
+cd /d D:\vscode\py\amazing_ideas\cc-statusboard
+python -m pip install --user .
+set "PATH=%APPDATA%\Python\Python311\Scripts;%PATH%"
+cc-statusboard -w
+```
+
+The `set` line makes the command available in that Command Prompt immediately.
+To make it available in every new terminal, add the directory printed by
+`python -m site --user-base` plus `\Python311\Scripts` to your user `Path`,
+then open a new terminal. (For the current environment that path is
+`C:\\Users\\Lenovo\\AppData\\Roaming\\Python\\Python311\\Scripts`.)
+
 `--watch` and `-w` are equivalent. Other common options are `-p 4000` (or
 `--port 4000`), `-n` (`--no-open`), `-V` (`--version`), and `-h` (`--help`).
 The global command stores `statusboard.json` and its pricing cache in your
