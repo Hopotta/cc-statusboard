@@ -33,28 +33,41 @@ usage. Both are marked with "~" in the UI.
 
 ## Quick start
 
-Requires Python 3.9+ and Node 18+ (run `npm install` inside `frontend/` once).
+Requires Python 3.9+. Install the project once to expose `cc-statusboard` on
+your PATH; after that it works from **any directory and terminal**. The
+installed package includes the built frontend, so Node is not needed to run it.
 
 ```bash
-# Data generation and stale-frontend rebuilds are handled automatically.
-python collector/serve_statusboard.py --port 3456
-# open http://127.0.0.1:3456
+# Recommended: isolated install, with its command directory added to PATH.
+pipx install .
+
+# Or install into the current Python environment.
+python -m pip install .
+
+# Generate, serve, and open http://127.0.0.1:3456
+cc-statusboard
+
+# Watch Claude Code and Codex JSONL files for changes.
+cc-statusboard -w
 ```
 
-Or, in one shot:
+`--watch` and `-w` are equivalent. Other common options are `-p 4000` (or
+`--port 4000`), `-n` (`--no-open`), `-V` (`--version`), and `-h` (`--help`).
+The global command stores `statusboard.json` and its pricing cache in your
+user data directory (`%LOCALAPPDATA%\\cc-statusboard` on Windows,
+`~/.local/state/cc-statusboard` on Linux); use `--data-dir DIR` or the
+`CC_STATUSBOARD_DATA_DIR` environment variable to choose another location.
+
+For development from a checkout, Node 18+ is required once to build the UI:
 
 ```bash
-# Auto-regenerates whenever a JSONL file changes, then serves on :3456
-python collector/serve_statusboard.py --watch
-```
-
-A cross-platform wrapper is provided:
-
-```bash
+cd frontend && npm install && cd ..
 bin/cc-statusboard              # POSIX (bash / zsh)
-bin/cc-statusboard --watch      # same, with auto-regenerate on JSONL change
-bin/cc-statusboard.cmd          # Windows
+bin/cc-statusboard.cmd -w       # Windows
 ```
+
+The project-local wrappers remain supported and deliberately write their
+generated artifact into the checkout root.
 
 ## Project layout
 
@@ -71,16 +84,17 @@ cc-statusboard/
 │   ├── aggregator.py         # joins everything into statusboard.json
 │   ├── watcher.py            # shared JSONL change watcher (both CLI entrypoints)
 │   ├── generate_statusboard.py  # CLI: build + (optional) watch statusboard.json
-│   └── serve_statusboard.py  # CLI: serve the built frontend + open browser
+│   ├── serve_statusboard.py  # CLI: serve the built frontend + open browser
+│   └── web-ui/               # versioned production frontend, shipped with the Python package
 ├── frontend/
 │   ├── src/                 # React + Vite + Tailwind + Recharts
-│   └── dist/                # build output
 ├── bin/
 │   ├── cc-statusboard       # POSIX launcher
 │   └── cc-statusboard.cmd   # Windows launcher
 ├── statusboard.json         # generated data artefact
 ├── CHANGELOG.md
 ├── LICENSE
+├── pyproject.toml            # installable Python package + cc-statusboard command
 └── README.md
 ```
 

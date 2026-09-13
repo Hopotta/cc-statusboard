@@ -2,6 +2,25 @@
 
 All notable changes to cc-statusboard will be documented in this file.
 
+## [0.5.0] - 2026-09-13
+
+### Added
+
+- Installable Python package with a global `cc-statusboard` console command.
+  After `pipx install .` or `python -m pip install .`, it can be called from
+  any directory and supported terminal without locating the checkout.
+- Conventional CLI aliases: `-w` / `--watch`, `-p` / `--port`, `-n` /
+  `--no-open`, and `-V` / `--version`; `--data-dir` and
+  `CC_STATUSBOARD_DATA_DIR` explicitly control generated local state.
+- The production frontend is bundled as package data, so starting the
+  installed command needs no Node.js or source checkout.
+
+### Changed
+
+- Global launches write generated `statusboard.json` and the ccusage cache to
+  a user-writable platform data directory instead of site-packages. Existing
+  project-local wrappers preserve their original checkout-root output.
+
 ## [0.4.2] - 2026-09-13
 
 ### Added

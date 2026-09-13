@@ -49,7 +49,9 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "dist",
+    // This directory is shipped as Python package data. `cc-statusboard`
+    // can therefore run from any shell after `pip install`, without Node.
+    outDir: "../collector/web-ui",
     emptyOutDir: true,
   },
 });

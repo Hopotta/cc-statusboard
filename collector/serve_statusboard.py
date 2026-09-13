@@ -27,8 +27,9 @@ import sys
 import threading
 import time
 import webbrowser
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Sequence
 
 # Allow `python collector/serve_statusboard.py` from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -36,7 +37,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from collector import generate_statusboard  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DIST = PROJECT_ROOT / "frontend" / "dist"
+PACKAGE_ROOT = Path(__file__).resolve().parent
+# The built UI is package data, so a `pip install` command can run without a
+# checkout or a Node runtime. In a source checkout this is also Vite's output.
+DEFAULT_DIST = PACKAGE_ROOT / "web-ui"
+FRONTEND_ROOT = PROJECT_ROOT / "frontend"
+
+
+def _default_data_dir() -> Path:
+    """Return a user-writable home for generated dashboard state."""
+    override = os.environ.get("CC_STATUSBOARD_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        return base / "cc-statusboard"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "cc-statusboard"
+    state_home = os.environ.get("XDG_STATE_HOME")
+    base = Path(state_home).expanduser() if state_home else Path.home() / ".local" / "state"
+    return base / "cc-statusboard"
+
+
+def _package_version() -> str:
+    try:
+        return version("cc-statusboard")
+    except PackageNotFoundError:
+        # Source checkouts remain runnable before the package is installed.
+        return "0.5.0"
 
 
 class _SilentHandler(http.server.SimpleHTTPRequestHandler):
@@ -138,22 +166,21 @@ def _pick_free_port(preferred: int) -> int:
             return s.getsockname()[1]
 
 
-def _dist_is_stale(dist: Path) -> bool:
+def _dist_is_stale(dist: Path, frontend_root: Path = FRONTEND_ROOT) -> bool:
     """True when the dist bundle is missing or older than any frontend source."""
     index = dist / "index.html"
     if not index.exists():
         return True
-    frontend = dist.parent
     candidates: list[float] = []
     for sub in ("src", "public"):
-        d = frontend / sub
+        d = frontend_root / sub
         if d.exists():
             candidates.extend(
                 p.stat().st_mtime for p in d.rglob("*") if p.is_file()
             )
     for name in ("index.html", "vite.config.ts", "tailwind.config.js",
                  "postcss.config.js", "package.json"):
-        f = frontend / name
+        f = frontend_root / name
         if f.exists():
             candidates.append(f.stat().st_mtime)
     if not candidates:
@@ -161,18 +188,21 @@ def _dist_is_stale(dist: Path) -> bool:
     return max(candidates) > index.stat().st_mtime
 
 
-def _ensure_dist(dist: Path) -> Path:
+def _ensure_dist(dist: Path = DEFAULT_DIST) -> Path:
     """Build the frontend when dist is missing or older than the sources."""
     if dist.exists() and (dist / "index.html").exists() and not _dist_is_stale(dist):
         return dist
+    if not FRONTEND_ROOT.exists():
+        raise RuntimeError(
+            "the installed package has no bundled frontend; reinstall cc-statusboard"
+        )
     reason = "missing" if not (dist / "index.html").exists() else "older than sources"
     print(f"[serve] frontend {reason}; building …", file=sys.stderr)
     import subprocess
 
-    frontend_dir = dist.parent
     proc = subprocess.run(
         ["npm", "run", "build"],
-        cwd=str(frontend_dir),
+        cwd=str(FRONTEND_ROOT),
         capture_output=True,
         text=True,
         timeout=300,
@@ -185,7 +215,7 @@ def _ensure_dist(dist: Path) -> Path:
     return dist
 
 
-def _ensure_fresh_json(out: Path) -> bool:
+def _ensure_fresh_json(out: Path, cache_path: Optional[Path] = None) -> bool:
     """Regenerate statusboard.json, falling back to the last known-good file.
 
     A ccusage failure (binary missing, offline, upstream hiccup) must not take
@@ -194,7 +224,8 @@ def _ensure_fresh_json(out: Path) -> bool:
     Returns True when the artifact is fresh, False when serving last-known-good.
     """
     try:
-        payload = generate_statusboard.build_statusboard()
+        kwargs = {"cache_path": cache_path} if cache_path is not None else {}
+        payload = generate_statusboard.build_statusboard(**kwargs)
         generate_statusboard.write_statusboard(out, payload)
         return True
     except Exception as exc:  # noqa: BLE001
@@ -208,25 +239,41 @@ def _ensure_fresh_json(out: Path) -> bool:
         raise
 
 
-def main() -> int:
+def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Serve the cc-statusboard frontend")
-    p.add_argument("--port", type=int, default=3456)
-    p.add_argument("--watch", action="store_true",
+    p.add_argument("-V", "--version", action="version", version=f"%(prog)s {_package_version()}")
+    p.add_argument("-p", "--port", type=int, default=3456,
+                   help="Local port to listen on (default: 3456)")
+    p.add_argument("-w", "--watch", action="store_true",
                    help="Regenerate statusboard.json on JSONL changes")
-    p.add_argument("--no-open", action="store_true",
+    p.add_argument("-n", "--no-open", action="store_true",
                    help="Don't open the browser automatically")
     p.add_argument("--no-build", action="store_true",
                    help="Serve dist as-is, skip the stale-frontend rebuild")
     p.add_argument("--source", type=Path, default=DEFAULT_DIST,
-                   help="Static dir to serve (defaults to frontend/dist)")
-    args = p.parse_args()
+                   help="Static directory to serve (advanced; skips automatic builds)")
+    p.add_argument(
+        "--data-dir", type=Path, default=_default_data_dir(), metavar="DIR",
+        help="Directory for statusboard.json and pricing cache "
+             f"(default: {_default_data_dir()})",
+    )
+    return p.parse_args(argv)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = _parse_args(argv)
+
+    data_dir = args.data_dir.expanduser()
+    data_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Make sure statusboard.json is fresh before serving.
-    out = PROJECT_ROOT / "statusboard.json"
-    fresh = _ensure_fresh_json(out)
+    out = data_dir / "statusboard.json"
+    cache_path = data_dir / ".ccusage_cache.json"
+    fresh = _ensure_fresh_json(out, cache_path)
 
     # 2. Ensure the frontend is up to date with its sources.
-    dist = args.source if args.no_build else _ensure_dist(args.source)
+    source = args.source.expanduser()
+    dist = source if args.no_build or source != DEFAULT_DIST else _ensure_dist(source)
 
     # 3. Bind a free port and serve the dist dir.
     port = _pick_free_port(args.port)
@@ -243,11 +290,11 @@ def main() -> int:
         # Background ccusage reconciler (A3): refreshes pricing + the
         # cross-check cache on a clock; the rebuild path never touches it.
         from collector import reconcile
-        reconcile.spawn_reconciler(generate_statusboard.CCUSAGE_CACHE_PATH)
+        reconcile.spawn_reconciler(cache_path)
 
         def watcher() -> None:
             try:
-                payload = generate_statusboard.build_statusboard()
+                payload = generate_statusboard.build_statusboard(cache_path=cache_path)
                 generate_statusboard.write_statusboard(out, payload)
                 httpd.stale_since = None
             except Exception:
@@ -260,6 +307,7 @@ def main() -> int:
     url = f"http://127.0.0.1:{port}/"
     print(f"\n[serve] cc-statusboard ready at {url}", file=sys.stderr)
     print(f"        serving from: {dist}", file=sys.stderr)
+    print(f"        data directory: {data_dir}", file=sys.stderr)
     if args.watch:
         print("        watching Claude Code + Codex logs for changes", file=sys.stderr)
 
