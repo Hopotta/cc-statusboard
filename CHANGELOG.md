@@ -13,6 +13,11 @@ All notable changes to cc-statusboard will be documented in this file.
 - The displayed frontend build version and both package manifests now agree
   on `0.5.1`.
 
+### Changed
+
+- Local-checkout setup documentation now recommends editable installation, so
+  routine Git updates do not require another `pip install --upgrade`.
+
 ## [0.5.0] - 2026-09-13
 
 ### Added

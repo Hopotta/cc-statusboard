@@ -41,8 +41,9 @@ installed package includes the built frontend, so Node is not needed to run it.
 # Recommended: isolated install, with its command directory added to PATH.
 pipx install .
 
-# Or install into the current Python environment.
-python -m pip install .
+# For a local checkout, install once in editable mode. Future source updates
+# are picked up without reinstalling the Python package.
+python -m pip install --editable .
 
 # Generate, serve, and open http://127.0.0.1:3456
 cc-statusboard
@@ -57,10 +58,14 @@ checkout (run it from the project directory, not from `C:\\Users\\Lenovo`):
 
 ```bat
 cd /d D:\vscode\py\amazing_ideas\cc-statusboard
-python -m pip install --user .
+python -m pip install --user --editable .
 set "PATH=%APPDATA%\Python\Python311\Scripts;%PATH%"
 cc-statusboard -w
 ```
+
+After that, pull updates, stop any running statusboard with `Ctrl+C`, and run
+`cc-statusboard` again. Reinstall only when the Python dependencies or the
+console-command definition in `pyproject.toml` changes.
 
 The `set` line makes the command available in that Command Prompt immediately.
 To make it available in every new terminal, add the directory printed by
