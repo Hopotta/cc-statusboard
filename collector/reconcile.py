@@ -33,7 +33,7 @@ import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Optional
 
 from . import ccusage_parser
 from .jsonl_parser import iter_jsonl_files
@@ -174,13 +174,19 @@ RECONCILE_INTERVAL_SECONDS = 6 * 60 * 60  # a few times a day is plenty
 def reconciler_loop(cache_path: Path,
                     interval: float = RECONCILE_INTERVAL_SECONDS,
                     jsonl_root: Optional[Path] = None,
-                    stop: Optional[threading.Event] = None) -> None:
+                    stop: Optional[threading.Event] = None,
+                    on_refresh: Optional[Callable[[], None]] = None) -> None:
     """Refresh the ccusage cache now, then every `interval` seconds, until
     `stop` is set.  Built to run inside a daemon thread; a failing cycle
     never ends the loop."""
     while True:
         try:
-            refresh(cache_path, jsonl_root=jsonl_root)
+            refreshed = refresh(cache_path, jsonl_root=jsonl_root)
+            # The cache is now newer than the served artifact. Let the server
+            # reprice it asynchronously; the initial launch never waits for
+            # ccusage, but a first global launch must not remain at $0.
+            if refreshed is not None and on_refresh is not None:
+                on_refresh()
         except Exception:  # noqa: BLE001
             traceback.print_exc()
         if stop is not None and stop.wait(interval):
@@ -190,13 +196,17 @@ def reconciler_loop(cache_path: Path,
 def spawn_reconciler(cache_path: Path,
                      interval: float = RECONCILE_INTERVAL_SECONDS,
                      jsonl_root: Optional[Path] = None,
+                     on_refresh: Optional[Callable[[], None]] = None,
                      ) -> tuple[threading.Thread, threading.Event]:
     """Start the background reconciler; returns (thread, stop_event)."""
     stop = threading.Event()
     t = threading.Thread(
         target=reconciler_loop,
         args=(cache_path,),
-        kwargs={"interval": interval, "jsonl_root": jsonl_root, "stop": stop},
+        kwargs={
+            "interval": interval, "jsonl_root": jsonl_root, "stop": stop,
+            "on_refresh": on_refresh,
+        },
         name="ccusage-reconciler",
         daemon=True,
     )

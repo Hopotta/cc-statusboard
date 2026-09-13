@@ -282,27 +282,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     httpd.fresh_json = out
     httpd.stale_since = None if fresh else time.time()
 
-    # 4. Optionally watch for JSONL changes (needs the server instance so a
-    # failed rebuild can flip the stale marker the UI polls).
+    # 4. Rebuild after a background pricing refresh. The initial data scan
+    # stays fast, while a new global data directory gains Claude pricing as
+    # soon as ccusage has populated its cache.
+    def rebuild() -> None:
+        try:
+            payload = generate_statusboard.build_statusboard(cache_path=cache_path)
+            generate_statusboard.write_statusboard(out, payload)
+            httpd.stale_since = None
+        except Exception:
+            if httpd.stale_since is None:
+                httpd.stale_since = time.time()
+            raise
+
+    from collector import reconcile
+    reconcile.spawn_reconciler(cache_path, on_refresh=rebuild)
+
+    # 5. Optionally watch for JSONL changes using the same safe rebuild.
     if args.watch:
         from collector.watcher import start_watcher
-
-        # Background ccusage reconciler (A3): refreshes pricing + the
-        # cross-check cache on a clock; the rebuild path never touches it.
-        from collector import reconcile
-        reconcile.spawn_reconciler(cache_path)
-
-        def watcher() -> None:
-            try:
-                payload = generate_statusboard.build_statusboard(cache_path=cache_path)
-                generate_statusboard.write_statusboard(out, payload)
-                httpd.stale_since = None
-            except Exception:
-                if httpd.stale_since is None:
-                    httpd.stale_since = time.time()
-                raise  # watch_loop prints the traceback and keeps going
-
-        start_watcher(watcher, interval=3.0, cooldown=10.0)
+        start_watcher(rebuild, interval=3.0, cooldown=10.0)
 
     url = f"http://127.0.0.1:{port}/"
     print(f"\n[serve] cc-statusboard ready at {url}", file=sys.stderr)

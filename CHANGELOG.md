@@ -2,6 +2,17 @@
 
 All notable changes to cc-statusboard will be documented in this file.
 
+## [0.5.1] - 2026-09-13
+
+### Fixed
+
+- A first global launch now rebuilds the served artifact after the background
+  ccusage pricing refresh completes. Claude Code no longer remains at
+  `no pricing data yet` / `~$0.000` merely because its new user data
+  directory started without a cache.
+- The displayed frontend build version and both package manifests now agree
+  on `0.5.1`.
+
 ## [0.5.0] - 2026-09-13
 
 ### Added
